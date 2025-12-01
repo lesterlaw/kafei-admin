@@ -29,3 +29,6 @@ WHERE au.email = 'admin@admin.com';
 -- WHERE email = 'admin@admin.com'
 -- ON CONFLICT (id) DO NOTHING;
 
+
+
+

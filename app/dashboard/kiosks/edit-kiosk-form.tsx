@@ -113,3 +113,6 @@ export function EditKioskForm({ kiosk }: { kiosk: Kiosk }) {
   )
 }
 
+
+
+

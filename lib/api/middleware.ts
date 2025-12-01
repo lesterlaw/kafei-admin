@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 
 export interface ApiResponse<T = any> {
   success: boolean
@@ -35,6 +36,48 @@ export const createApiError = (
 }
 
 export const authenticateRequest = async (request: NextRequest) => {
+  // Check for Bearer token in Authorization header (mobile app)
+  const authHeader = request.headers.get('authorization')
+  if (authHeader?.startsWith('Bearer ')) {
+    const token = authHeader.substring(7)
+    
+    // Handle dev tokens (format: dev_token_${userId}_${timestamp})
+    if (token.startsWith('dev_token_')) {
+      const parts = token.split('_')
+      if (parts.length >= 3) {
+        const userId = parts[2]
+        const adminClient = createAdminClient()
+        
+        // Get user from database
+        const { data: userData } = await adminClient
+          .from('users')
+          .select('*')
+          .eq('id', userId)
+          .single()
+        
+        if (userData) {
+          // Return a user-like object for dev mode
+          return {
+            id: userData.id,
+            email: userData.email,
+            phone: userData.phone,
+            created_at: userData.created_at,
+            updated_at: userData.updated_at,
+          } as any
+        }
+      }
+    }
+    
+    // Try to validate as a real Supabase token
+    const adminClient = createAdminClient()
+    const { data: { user }, error } = await adminClient.auth.getUser(token)
+    
+    if (!error && user) {
+      return user
+    }
+  }
+
+  // Fall back to cookie-based authentication (web admin)
   const supabase = await createServerSupabaseClient()
   const {
     data: { user },
@@ -67,4 +110,7 @@ export const authenticateAdminRequest = async (request: NextRequest) => {
 
   return { user, admin }
 }
+
+
+
 

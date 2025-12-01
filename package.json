@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "seed:admin": "tsx scripts/seed-admin.ts"
+    "seed:admin": "tsx scripts/seed-admin.ts",
+    "seed:data": "tsx scripts/seed-data.ts",
+    "seed:all": "tsx scripts/seed-admin.ts && tsx scripts/seed-data.ts"
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.1.15",

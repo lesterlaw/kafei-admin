@@ -130,3 +130,6 @@ export async function deleteKiosk(id: string) {
   return { success: true }
 }
 
+
+
+
