@@ -29,11 +29,7 @@ export async function POST(request: NextRequest) {
       
       if (phone) {
         // Check if user exists by phone in users table
-        const { data: existingUser } = await adminClient
-          .from('users')
-          .select('*')
-          .eq('phone', phone)
-          .maybeSingle()
+        const existingUser = await findUserByPhone(adminClient, phone)
         
         if (existingUser) {
           userId = existingUser.id
@@ -41,7 +37,7 @@ export async function POST(request: NextRequest) {
         } else {
           const existingAuthUser = await findAuthUser(
             adminClient,
-            (authUser) => authUser.phone === phone
+            (authUser) => normalizePhone(authUser.phone) === normalizePhone(phone)
           )
 
           if (existingAuthUser) {
@@ -61,7 +57,7 @@ export async function POST(request: NextRequest) {
             userData = syncedUser
           } else {
             // Use placeholder email for phone signups
-            const placeholderEmail = `${phone.replace(/\+/g, '')}@phone.kafei.local`
+            const placeholderEmail = `${normalizePhone(phone)}@phone.kafei.local`
             
             // First, create user in Supabase Auth (required due to foreign key)
             const { data: authData, error: authError } = await adminClient.auth.admin.createUser({
@@ -214,7 +210,7 @@ export async function POST(request: NextRequest) {
         await adminClient.from('users').insert({
           id: data.user.id,
           phone: phone,
-          email: data.user.email || null,
+          email: data.user.email || `${normalizePhone(phone)}@phone.kafei.local`,
           is_blocked: false,
           referral_code: generateReferralCode(),
         })
@@ -255,6 +251,32 @@ function generateReferralCode(): string {
   return Math.random().toString(36).substring(2, 10).toUpperCase()
 }
 
+function normalizePhone(phone?: string | null): string {
+  return (phone ?? '').replace(/\D/g, '')
+}
+
+async function findUserByPhone(
+  adminClient: ReturnType<typeof createAdminClient>,
+  phone: string
+) {
+  const normalizedPhone = normalizePhone(phone)
+  const phoneCandidates = Array.from(
+    new Set([phone, normalizedPhone, `+${normalizedPhone}`].filter(Boolean))
+  )
+
+  const { data, error } = await adminClient
+    .from('users')
+    .select('*')
+    .in('phone', phoneCandidates)
+
+  if (error) {
+    console.error('Failed to find user by phone:', error)
+    return null
+  }
+
+  return data.find((user) => normalizePhone(user.phone) === normalizedPhone) ?? null
+}
+
 async function findAuthUser(
   adminClient: ReturnType<typeof createAdminClient>,
   matches: (user: AuthUser) => boolean
@@ -288,7 +310,7 @@ async function syncPhoneUserRecord(
   authUser: AuthUser,
   phone: string
 ) {
-  const fallbackEmail = `${phone.replace(/\+/g, '')}@phone.kafei.local`
+  const fallbackEmail = `${normalizePhone(phone)}@phone.kafei.local`
   const { data: existingUserById } = await adminClient
     .from('users')
     .select('*')
@@ -298,7 +320,7 @@ async function syncPhoneUserRecord(
   if (existingUserById) {
     const updateData: Record<string, string> = {}
 
-    if (existingUserById.phone !== phone) {
+    if (normalizePhone(existingUserById.phone) !== normalizePhone(phone)) {
       updateData.phone = phone
     }
 
