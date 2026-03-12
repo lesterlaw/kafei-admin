@@ -1,6 +1,27 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { createApiResponse, createApiError, authenticateRequest } from '@/lib/api/middleware'
 import { createClient } from '@supabase/supabase-js'
+import { z } from 'zod'
+
+const uuidSchema = z.string().uuid()
+
+const createOrderSchema = z.object({
+  kiosk_id: uuidSchema,
+  product_id: uuidSchema,
+  addons: z.array(uuidSchema).optional(),
+  // Ignore legacy placeholder coupon ids from older mobile builds.
+  coupon_id: z.preprocess((value) => {
+    if (typeof value !== 'string' || value.trim() === '') {
+      return undefined
+    }
+
+    return uuidSchema.safeParse(value).success ? value : undefined
+  }, uuidSchema.optional()),
+})
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : 'Internal server error'
+}
 
 // Create admin client inline to ensure service role key is used
 function getAdminClient() {
@@ -39,8 +60,8 @@ export async function GET(request: NextRequest) {
     }
 
     return createApiResponse(data || [])
-  } catch (error: any) {
-    return createApiError(error.message || 'Internal server error', 500)
+  } catch (error: unknown) {
+    return createApiError(getErrorMessage(error), 500)
   }
 }
 
@@ -53,12 +74,14 @@ export async function POST(request: NextRequest) {
 
     console.log('Creating order for user:', user.id)
 
-    const { kiosk_id, product_id, addons, coupon_id } = await request.json()
+    const requestBody = await request.json()
+    const validationResult = createOrderSchema.safeParse(requestBody)
 
-    if (!kiosk_id || !product_id) {
-      return createApiError('Kiosk ID and Product ID are required', 400)
+    if (!validationResult.success) {
+      return createApiError('Invalid order payload', 400)
     }
 
+    const { kiosk_id, product_id, addons, coupon_id } = validationResult.data
     const adminClient = getAdminClient()
 
     // Verify user exists in users table
@@ -97,6 +120,32 @@ export async function POST(request: NextRequest) {
       return createApiError('Kiosk not found', 404)
     }
 
+    let validatedCouponId: string | null = null
+
+    if (coupon_id) {
+      const { data: coupon, error: couponError } = await adminClient
+        .from('coupons')
+        .select('id, expires_at, is_redeemed')
+        .eq('id', coupon_id)
+        .eq('user_id', user.id)
+        .single()
+
+      if (couponError || !coupon) {
+        console.error('Coupon not found for user:', coupon_id, couponError)
+        return createApiError('Coupon not found', 404)
+      }
+
+      if (coupon.is_redeemed) {
+        return createApiError('Coupon has already been redeemed', 400)
+      }
+
+      if (new Date(coupon.expires_at) < new Date()) {
+        return createApiError('Coupon has expired', 400)
+      }
+
+      validatedCouponId = coupon.id
+    }
+
     // Calculate total (add addon prices if provided)
     let total = Number(product.price)
 
@@ -123,7 +172,7 @@ export async function POST(request: NextRequest) {
         order_number: orderNumber,
         user_id: user.id,
         kiosk_id,
-        coupon_id: coupon_id || null,
+        coupon_id: validatedCouponId,
         total_amount: total,
         status: 'pending',
       })
@@ -153,9 +202,9 @@ export async function POST(request: NextRequest) {
     }
 
     return createApiResponse(order)
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Order API error:', error)
-    return createApiError(error.message || 'Internal server error', 500)
+    return createApiError(getErrorMessage(error), 500)
   }
 }
 
