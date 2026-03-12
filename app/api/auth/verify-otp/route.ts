@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createApiResponse, createApiError, authenticateRequest } from '@/lib/api/middleware'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import type { User as AuthUser } from '@supabase/supabase-js'
 import { randomUUID } from 'crypto'
 
 // Default OTP for development - TODO: Remove in production
@@ -32,52 +33,74 @@ export async function POST(request: NextRequest) {
           .from('users')
           .select('*')
           .eq('phone', phone)
-          .single()
+          .maybeSingle()
         
         if (existingUser) {
           userId = existingUser.id
           userData = existingUser
         } else {
-          // Use placeholder email for phone signups
-          const placeholderEmail = `${phone.replace(/\+/g, '')}@phone.kafei.local`
-          
-          // First, create user in Supabase Auth (required due to foreign key)
-          const { data: authData, error: authError } = await adminClient.auth.admin.createUser({
-            email: placeholderEmail,
-            phone: phone,
-            email_confirm: true,
-            phone_confirm: true,
-          })
-          
-          if (authError || !authData.user) {
-            console.error('Failed to create auth user:', authError)
-            return createApiError('Failed to create user: ' + (authError?.message || 'Unknown error'), 500)
+          const existingAuthUser = await findAuthUser(
+            adminClient,
+            (authUser) => authUser.phone === phone
+          )
+
+          if (existingAuthUser) {
+            userId = existingAuthUser.id
+
+            const { data: syncedUser, error: syncError } = await syncPhoneUserRecord(
+              adminClient,
+              existingAuthUser,
+              phone
+            )
+
+            if (syncError || !syncedUser) {
+              console.error('Failed to sync user record:', syncError)
+              return createApiError('Failed to create user: ' + (syncError?.message || 'Unknown error'), 500)
+            }
+
+            userData = syncedUser
+          } else {
+            // Use placeholder email for phone signups
+            const placeholderEmail = `${phone.replace(/\+/g, '')}@phone.kafei.local`
+            
+            // First, create user in Supabase Auth (required due to foreign key)
+            const { data: authData, error: authError } = await adminClient.auth.admin.createUser({
+              email: placeholderEmail,
+              phone: phone,
+              email_confirm: true,
+              phone_confirm: true,
+            })
+            
+            if (authError || !authData.user) {
+              console.error('Failed to create auth user:', authError)
+              return createApiError('Failed to create user: ' + (authError?.message || 'Unknown error'), 500)
+            }
+            
+            userId = authData.user.id
+            
+            // Now create in users table with the auth user's ID
+            const newUser = {
+              id: userId,
+              phone: phone,
+              email: placeholderEmail,
+              full_name: null,
+              is_blocked: false,
+              referral_code: generateReferralCode(),
+            }
+            
+            const { data: insertedUser, error: insertError } = await adminClient
+              .from('users')
+              .insert(newUser)
+              .select()
+              .single()
+            
+            if (insertError) {
+              console.error('Failed to create user record:', insertError)
+              return createApiError('Failed to create user: ' + insertError.message, 500)
+            }
+            
+            userData = insertedUser
           }
-          
-          userId = authData.user.id
-          
-          // Now create in users table with the auth user's ID
-          const newUser = {
-            id: userId,
-            phone: phone,
-            email: placeholderEmail,
-            full_name: null,
-            is_blocked: false,
-            referral_code: generateReferralCode(),
-          }
-          
-          const { data: insertedUser, error: insertError } = await adminClient
-            .from('users')
-            .insert(newUser)
-            .select()
-            .single()
-          
-          if (insertError) {
-            console.error('Failed to create user record:', insertError)
-            return createApiError('Failed to create user: ' + insertError.message, 500)
-          }
-          
-          userData = insertedUser
         }
       } else {
         // Email flow
@@ -85,46 +108,68 @@ export async function POST(request: NextRequest) {
           .from('users')
           .select('*')
           .eq('email', email)
-          .single()
+          .maybeSingle()
         
         if (existingUser) {
           userId = existingUser.id
           userData = existingUser
         } else {
-          // First, create user in Supabase Auth
-          const { data: authData, error: authError } = await adminClient.auth.admin.createUser({
-            email: email!,
-            email_confirm: true,
-          })
-          
-          if (authError || !authData.user) {
-            console.error('Failed to create auth user:', authError)
-            return createApiError('Failed to create user: ' + (authError?.message || 'Unknown error'), 500)
+          const existingAuthUser = await findAuthUser(
+            adminClient,
+            (authUser) => authUser.email === email
+          )
+
+          if (existingAuthUser) {
+            userId = existingAuthUser.id
+
+            const { data: syncedUser, error: syncError } = await syncEmailUserRecord(
+              adminClient,
+              existingAuthUser,
+              email!
+            )
+
+            if (syncError || !syncedUser) {
+              console.error('Failed to sync user record:', syncError)
+              return createApiError('Failed to create user: ' + (syncError?.message || 'Unknown error'), 500)
+            }
+
+            userData = syncedUser
+          } else {
+            // First, create user in Supabase Auth
+            const { data: authData, error: authError } = await adminClient.auth.admin.createUser({
+              email: email!,
+              email_confirm: true,
+            })
+            
+            if (authError || !authData.user) {
+              console.error('Failed to create auth user:', authError)
+              return createApiError('Failed to create user: ' + (authError?.message || 'Unknown error'), 500)
+            }
+            
+            userId = authData.user.id
+            
+            const newUser = {
+              id: userId,
+              phone: '',
+              email: email,
+              full_name: null,
+              is_blocked: false,
+              referral_code: generateReferralCode(),
+            }
+            
+            const { data: insertedUser, error: insertError } = await adminClient
+              .from('users')
+              .insert(newUser)
+              .select()
+              .single()
+            
+            if (insertError) {
+              console.error('Failed to create user record:', insertError)
+              return createApiError('Failed to create user: ' + insertError.message, 500)
+            }
+            
+            userData = insertedUser
           }
-          
-          userId = authData.user.id
-          
-          const newUser = {
-            id: userId,
-            phone: '',
-            email: email,
-            full_name: null,
-            is_blocked: false,
-            referral_code: generateReferralCode(),
-          }
-          
-          const { data: insertedUser, error: insertError } = await adminClient
-            .from('users')
-            .insert(newUser)
-            .select()
-            .single()
-          
-          if (insertError) {
-            console.error('Failed to create user record:', insertError)
-            return createApiError('Failed to create user: ' + insertError.message, 500)
-          }
-          
-          userData = insertedUser
         }
       }
       
@@ -208,5 +253,120 @@ export async function POST(request: NextRequest) {
 
 function generateReferralCode(): string {
   return Math.random().toString(36).substring(2, 10).toUpperCase()
+}
+
+async function findAuthUser(
+  adminClient: ReturnType<typeof createAdminClient>,
+  matches: (user: AuthUser) => boolean
+): Promise<AuthUser | null> {
+  let page = 1
+  const perPage = 200
+
+  while (true) {
+    const { data, error } = await adminClient.auth.admin.listUsers({ page, perPage })
+
+    if (error) {
+      console.error('Failed to list auth users:', error)
+      return null
+    }
+
+    const matchedUser = data.users.find(matches)
+    if (matchedUser) {
+      return matchedUser
+    }
+
+    if (data.users.length < perPage) {
+      return null
+    }
+
+    page += 1
+  }
+}
+
+async function syncPhoneUserRecord(
+  adminClient: ReturnType<typeof createAdminClient>,
+  authUser: AuthUser,
+  phone: string
+) {
+  const fallbackEmail = `${phone.replace(/\+/g, '')}@phone.kafei.local`
+  const { data: existingUserById } = await adminClient
+    .from('users')
+    .select('*')
+    .eq('id', authUser.id)
+    .maybeSingle()
+
+  if (existingUserById) {
+    const updateData: Record<string, string> = {}
+
+    if (existingUserById.phone !== phone) {
+      updateData.phone = phone
+    }
+
+    if (!existingUserById.email) {
+      updateData.email = authUser.email || fallbackEmail
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return { data: existingUserById, error: null }
+    }
+
+    return adminClient
+      .from('users')
+      .update(updateData)
+      .eq('id', authUser.id)
+      .select()
+      .single()
+  }
+
+  return adminClient
+    .from('users')
+    .insert({
+      id: authUser.id,
+      phone,
+      email: authUser.email || fallbackEmail,
+      full_name: null,
+      is_blocked: false,
+      referral_code: generateReferralCode(),
+    })
+    .select()
+    .single()
+}
+
+async function syncEmailUserRecord(
+  adminClient: ReturnType<typeof createAdminClient>,
+  authUser: AuthUser,
+  email: string
+) {
+  const { data: existingUserById } = await adminClient
+    .from('users')
+    .select('*')
+    .eq('id', authUser.id)
+    .maybeSingle()
+
+  if (existingUserById) {
+    if (existingUserById.email === email) {
+      return { data: existingUserById, error: null }
+    }
+
+    return adminClient
+      .from('users')
+      .update({ email })
+      .eq('id', authUser.id)
+      .select()
+      .single()
+  }
+
+  return adminClient
+    .from('users')
+    .insert({
+      id: authUser.id,
+      phone: authUser.phone || '',
+      email,
+      full_name: null,
+      is_blocked: false,
+      referral_code: generateReferralCode(),
+    })
+    .select()
+    .single()
 }
 

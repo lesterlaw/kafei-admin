@@ -75,3 +75,4 @@ CREATE POLICY "Users can insert own profile" ON public.users
 ALTER TABLE public.orders FORCE ROW LEVEL SECURITY;
 ALTER TABLE public.order_items FORCE ROW LEVEL SECURITY;
 
+
