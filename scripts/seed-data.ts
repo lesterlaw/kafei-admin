@@ -75,96 +75,120 @@ async function seedData() {
     }
   }
 
-  // Seed Products (Coffee Drinks)
+  // Seed Products (Coffee Drinks) — kiosk menu: hot / iced variants with fixed prices
   console.log('\nSeeding products...')
   const products = [
     {
-      name: 'Espresso',
-      description: 'Strong concentrated coffee shot',
-      price: 3.50,
-      temperature: 'hot',
-      is_hidden: false,
-    },
-    {
-      name: 'Americano',
-      description: 'Espresso with hot water',
-      price: 4.00,
-      temperature: 'both',
-      is_hidden: false,
-    },
-    {
-      name: 'Latte',
+      name: 'Hot Latte',
       description: 'Espresso with steamed milk',
-      price: 5.00,
-      temperature: 'both',
-      is_hidden: false,
-    },
-    {
-      name: 'Cappuccino',
-      description: 'Espresso with foamed milk',
-      price: 5.00,
+      price: 4.0,
       temperature: 'hot',
       is_hidden: false,
     },
     {
-      name: 'Mocha',
-      description: 'Espresso with chocolate and steamed milk',
-      price: 5.50,
-      temperature: 'both',
-      is_hidden: false,
-    },
-    {
-      name: 'Chai Latte',
-      description: 'Spiced tea with steamed milk',
-      price: 5.00,
-      temperature: 'both',
-      is_hidden: false,
-    },
-    {
-      name: 'Flat White',
-      description: 'Double espresso with velvety milk',
-      price: 5.00,
-      temperature: 'hot',
-      is_hidden: false,
-    },
-    {
-      name: 'Macchiato',
-      description: 'Espresso marked with foamed milk',
-      price: 4.00,
-      temperature: 'hot',
-      is_hidden: false,
-    },
-    {
-      name: 'Cold Brew',
-      description: 'Smooth, slow-steeped cold coffee',
-      price: 5.00,
+      name: 'Iced Latte',
+      description: 'Espresso with cold milk over ice',
+      price: 4.5,
       temperature: 'cold',
       is_hidden: false,
     },
     {
-      name: 'Iced Matcha Latte',
-      description: 'Japanese green tea with milk over ice',
-      price: 5.50,
+      name: 'Hot Cappuccino',
+      description: 'Espresso with foamed milk',
+      price: 4.0,
+      temperature: 'hot',
+      is_hidden: false,
+    },
+    {
+      name: 'Iced Cappuccino',
+      description: 'Espresso with foamed milk over ice',
+      price: 4.5,
+      temperature: 'cold',
+      is_hidden: false,
+    },
+    {
+      name: 'Hot Mocha',
+      description: 'Espresso with chocolate and steamed milk',
+      price: 4.5,
+      temperature: 'hot',
+      is_hidden: false,
+    },
+    {
+      name: 'Iced Mocha',
+      description: 'Espresso with chocolate and milk over ice',
+      price: 5.0,
+      temperature: 'cold',
+      is_hidden: false,
+    },
+    {
+      name: 'Hot Americano',
+      description: 'Espresso with hot water',
+      price: 3.0,
+      temperature: 'hot',
+      is_hidden: false,
+    },
+    {
+      name: 'Iced Americano',
+      description: 'Espresso with cold water over ice',
+      price: 3.5,
+      temperature: 'cold',
+      is_hidden: false,
+    },
+    {
+      name: 'Hot Chocolate',
+      description: 'Rich chocolate drink',
+      price: 3.0,
+      temperature: 'hot',
+      is_hidden: false,
+    },
+    {
+      name: 'Iced Chocolate',
+      description: 'Rich chocolate drink over ice',
+      price: 3.5,
       temperature: 'cold',
       is_hidden: false,
     },
   ]
+  const productNames = products.map((product) => product.name)
+
+  const { error: hideProductsError } = await supabase
+    .from('products')
+    .update({ is_hidden: true, updated_at: new Date().toISOString() })
+    .not('id', 'is', null)
+
+  if (hideProductsError) {
+    console.error('Failed to hide existing products:', hideProductsError.message)
+  }
 
   for (const product of products) {
-    const { data: existing } = await supabase
+    const { data: existingProducts, error: lookupError } = await supabase
       .from('products')
       .select('id')
       .eq('name', product.name)
-      .single()
 
-    if (existing) {
-      console.log(`  - ${product.name} already exists, skipping`)
+    if (lookupError) {
+      console.error(`Failed to check product ${product.name}:`, lookupError.message)
       continue
     }
 
-    const { error } = await supabase
-      .from('products')
-      .insert(product)
+    const existingProduct = existingProducts?.[0]
+
+    if (existingProduct) {
+      const { error } = await supabase
+        .from('products')
+        .update({ ...product, updated_at: new Date().toISOString() })
+        .eq('id', existingProduct.id)
+
+      if (error) {
+        console.error(`Failed to update product ${product.name}:`, error.message)
+      } else {
+        console.log(`  - ${product.name} updated`)
+      }
+
+      continue
+    }
+
+    const { error } = await supabase.from('products').insert(product)
 
     if (error) {
       console.error(`Failed to seed product ${product.name}:`, error.message)
@@ -173,76 +197,67 @@ async function seedData() {
     }
   }
 
-  // Seed Add-ons
+  console.log(`  - Active drink menu: ${productNames.join(', ')}`)
+
+  // Seed Add-ons (kiosk menu: Oat Milk, Espresso, Flavors)
   console.log('\nSeeding add-ons...')
   const addOns = [
     {
-      name: 'Extra Shot',
-      description: 'Add an extra espresso shot',
-      price: 1.00,
-      temperature: 'both',
-      is_hidden: false,
-    },
-    {
       name: 'Oat Milk',
       description: 'Substitute with oat milk',
-      price: 0.80,
-      temperature: 'both',
+      price: 0.7,
+      temperature: 'both' as const,
       is_hidden: false,
     },
     {
-      name: 'Almond Milk',
-      description: 'Substitute with almond milk',
-      price: 0.80,
-      temperature: 'both',
+      name: 'Espresso',
+      description: 'Extra espresso shot',
+      price: 1.0,
+      temperature: 'both' as const,
       is_hidden: false,
     },
     {
-      name: 'Soy Milk',
-      description: 'Substitute with soy milk',
-      price: 0.60,
-      temperature: 'both',
-      is_hidden: false,
-    },
-    {
-      name: 'Vanilla Syrup',
-      description: 'Add vanilla flavoring',
-      price: 0.50,
-      temperature: 'both',
-      is_hidden: false,
-    },
-    {
-      name: 'Caramel Syrup',
-      description: 'Add caramel flavoring',
-      price: 0.50,
-      temperature: 'both',
-      is_hidden: false,
-    },
-    {
-      name: 'Hazelnut Syrup',
-      description: 'Add hazelnut flavoring',
-      price: 0.50,
-      temperature: 'both',
-      is_hidden: false,
-    },
-    {
-      name: 'Whipped Cream',
-      description: 'Top with whipped cream',
-      price: 0.50,
-      temperature: 'both',
+      name: 'Flavors',
+      description: 'Syrup or flavor add-on',
+      price: 0.5,
+      temperature: 'both' as const,
       is_hidden: false,
     },
   ]
+  const addOnNames = addOns.map((addon) => addon.name)
+
+  const { error: hideAddOnsError } = await supabase
+    .from('add_ons')
+    .update({ is_hidden: true, updated_at: new Date().toISOString() })
+    .not('id', 'is', null)
+
+  if (hideAddOnsError) {
+    console.error('Failed to hide existing add-ons:', hideAddOnsError.message)
+  }
 
   for (const addon of addOns) {
-    const { data: existing } = await supabase
+    const { data: existingAddOns, error: lookupError } = await supabase
       .from('add_ons')
       .select('id')
       .eq('name', addon.name)
-      .single()
 
-    if (existing) {
-      console.log(`  - ${addon.name} already exists, skipping`)
+    if (lookupError) {
+      console.error(`Failed to check add-on ${addon.name}:`, lookupError.message)
+      continue
+    }
+
+    const existingAddOn = existingAddOns?.[0]
+
+    if (existingAddOn) {
+      const { error: updErr } = await supabase
+        .from('add_ons')
+        .update({ ...addon, updated_at: new Date().toISOString() })
+        .eq('id', existingAddOn.id)
+      if (updErr) {
+        console.error(`  - ${addon.name}: could not update price:`, updErr.message)
+      } else {
+        console.log(`  - ${addon.name} price/description updated`)
+      }
       continue
     }
 
@@ -256,6 +271,8 @@ async function seedData() {
       console.log(`  - ${addon.name} seeded`)
     }
   }
+
+  console.log(`  - Active add-ons: ${addOnNames.join(', ')}`)
 
   // Seed Kiosks
   console.log('\nSeeding kiosks...')
