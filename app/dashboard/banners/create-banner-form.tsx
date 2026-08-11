@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { updateKiosk } from '@/app/actions/kiosks'
+import { createBanner } from '@/app/actions/banners'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -12,20 +12,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Kiosk } from '@/types/database'
 
-export function EditKioskForm({ kiosk }: { kiosk: Kiosk }) {
+export function CreateBannerForm() {
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
-  const [isActive, setIsActive] = useState<string>(kiosk.is_active ? 'true' : 'false')
+  const [isActive, setIsActive] = useState<string>('true')
 
   const handleSubmit = async (formData: FormData) => {
     setIsLoading(true)
     setError(null)
-
     formData.set('is_active', isActive)
 
-    const result = await updateKiosk(kiosk.id, formData)
+    const result = await createBanner(formData)
 
     if (result?.error) {
       setError(result.error)
@@ -43,68 +41,40 @@ export function EditKioskForm({ kiosk }: { kiosk: Kiosk }) {
         </div>
       )}
       <div className="space-y-2">
-        <Label htmlFor="name">Kiosk Name</Label>
+        <Label htmlFor="image_url">Image URL</Label>
         <Input
-          id="name"
-          name="name"
-          defaultValue={kiosk.name}
+          id="image_url"
+          name="image_url"
+          type="url"
+          placeholder="https://..."
           required
-          disabled={isLoading}
-        />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="location">Location</Label>
-        <Input
-          id="location"
-          name="location"
-          defaultValue={kiosk.location}
-          required
-          disabled={isLoading}
-        />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="address">Address</Label>
-        <Input
-          id="address"
-          name="address"
-          defaultValue={kiosk.address}
-          required
-          disabled={isLoading}
-        />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="pod_id">CofePlus Pod ID</Label>
-        <Input
-          id="pod_id"
-          name="pod_id"
-          placeholder="e.g. RCK111"
-          defaultValue={kiosk.pod_id || ''}
           disabled={isLoading}
         />
         <p className="text-xs text-muted-foreground">
-          Machine serial used for pickup QR dispatches. Leave empty for
-          non-machine kiosks.
+          Recommended size: 1200×600 px (2:1)
         </p>
       </div>
       <div className="space-y-2">
-        <Label htmlFor="latitude">Latitude (Optional)</Label>
+        <Label htmlFor="title">Title</Label>
+        <Input id="title" name="title" disabled={isLoading} />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="link_url">Link URL</Label>
         <Input
-          id="latitude"
-          name="latitude"
-          type="number"
-          step="0.000001"
-          defaultValue={kiosk.latitude?.toString() || ''}
+          id="link_url"
+          name="link_url"
+          type="url"
+          placeholder="https://... (optional)"
           disabled={isLoading}
         />
       </div>
       <div className="space-y-2">
-        <Label htmlFor="longitude">Longitude (Optional)</Label>
+        <Label htmlFor="sort_order">Sort Order</Label>
         <Input
-          id="longitude"
-          name="longitude"
+          id="sort_order"
+          name="sort_order"
           type="number"
-          step="0.000001"
-          defaultValue={kiosk.longitude?.toString() || ''}
+          defaultValue={0}
           disabled={isLoading}
         />
       </div>
@@ -121,12 +91,8 @@ export function EditKioskForm({ kiosk }: { kiosk: Kiosk }) {
         </Select>
       </div>
       <Button type="submit" className="w-full" disabled={isLoading}>
-        {isLoading ? 'Updating...' : 'Update Kiosk'}
+        {isLoading ? 'Creating...' : 'Create Banner'}
       </Button>
     </form>
   )
 }
-
-
-
-

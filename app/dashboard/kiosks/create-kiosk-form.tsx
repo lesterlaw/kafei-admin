@@ -54,6 +54,19 @@ export function CreateKioskForm() {
         <Input id="address" name="address" required disabled={isLoading} />
       </div>
       <div className="space-y-2">
+        <Label htmlFor="pod_id">CofePlus Pod ID</Label>
+        <Input
+          id="pod_id"
+          name="pod_id"
+          placeholder="e.g. RCK111"
+          disabled={isLoading}
+        />
+        <p className="text-xs text-muted-foreground">
+          Machine serial used for pickup QR dispatches. Leave empty for
+          non-machine kiosks.
+        </p>
+      </div>
+      <div className="space-y-2">
         <Label htmlFor="latitude">Latitude (Optional)</Label>
         <Input
           id="latitude"

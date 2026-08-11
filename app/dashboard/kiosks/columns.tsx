@@ -100,6 +100,18 @@ export const kioskColumns: ColumnDef<Kiosk>[] = [
     header: 'Address',
   },
   {
+    accessorKey: 'pod_id',
+    header: 'Pod ID',
+    cell: ({ row }) => {
+      const podId = row.original.pod_id
+      return podId ? (
+        <code className="text-xs">{podId}</code>
+      ) : (
+        <span className="text-muted-foreground">—</span>
+      )
+    },
+  },
+  {
     accessorKey: 'is_active',
     header: 'Status',
     cell: ({ row }) => {

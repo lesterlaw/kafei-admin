@@ -12,6 +12,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import { CreateKioskForm } from './create-kiosk-form'
+import { CofeplusSyncButton } from '@/components/api-test/cofeplus-sync-button'
 
 export default async function KiosksPage() {
   const kiosks = await getKiosks()
@@ -25,27 +26,29 @@ export default async function KiosksPage() {
             View and manage kiosk locations
           </p>
         </div>
-        <Dialog>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="mr-2 h-4 w-4" />
-              Create Kiosk
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Create New Kiosk</DialogTitle>
-              <DialogDescription>
-                Add a new kiosk location.
-              </DialogDescription>
-            </DialogHeader>
-            <CreateKioskForm />
-          </DialogContent>
-        </Dialog>
+        <div className="flex gap-2">
+          <CofeplusSyncButton />
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button>
+                <Plus className="mr-2 h-4 w-4" />
+                Create Kiosk
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Create New Kiosk</DialogTitle>
+                <DialogDescription>
+                  Add a new kiosk location.
+                </DialogDescription>
+              </DialogHeader>
+              <CreateKioskForm />
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
 
       <DataTable columns={kioskColumns} data={kiosks} searchKey="name" />
     </div>
   )
 }
-

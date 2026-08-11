@@ -18,8 +18,11 @@ import {
   HeadphonesIcon,
   Bell,
   FileText,
+  Image,
+  Tag,
   Settings,
   LogOut,
+  FlaskConical,
 } from 'lucide-react'
 import {
   Sidebar,
@@ -105,6 +108,11 @@ const navItems = [
         url: '/dashboard/coupons',
         icon: Ticket,
       },
+      {
+        title: 'Promo Codes',
+        url: '/dashboard/promo-codes',
+        icon: Tag,
+      },
     ],
   },
   {
@@ -121,6 +129,11 @@ const navItems = [
         icon: Bell,
       },
       {
+        title: 'Banners',
+        url: '/dashboard/banners',
+        icon: Image,
+      },
+      {
         title: 'Subpages',
         url: '/dashboard/subpages',
         icon: FileText,
@@ -134,6 +147,11 @@ const navItems = [
         title: 'Settings',
         url: '/dashboard/settings',
         icon: Settings,
+      },
+      {
+        title: 'API Test',
+        url: '/dashboard/api-test',
+        icon: FlaskConical,
       },
     ],
   },

@@ -68,6 +68,8 @@ export async function createKiosk(formData: FormData) {
   const latitude = formData.get('latitude') ? parseFloat(formData.get('latitude') as string) : null
   const longitude = formData.get('longitude') ? parseFloat(formData.get('longitude') as string) : null
   const isActive = formData.get('is_active') !== 'false'
+  const podIdRaw = (formData.get('pod_id') as string | null)?.trim() || ''
+  const podId = podIdRaw || null
 
   const { error } = await supabase.from('kiosks').insert({
     name,
@@ -76,6 +78,7 @@ export async function createKiosk(formData: FormData) {
     latitude,
     longitude,
     is_active: isActive,
+    pod_id: podId,
   })
 
   if (error) {
@@ -96,6 +99,8 @@ export async function updateKiosk(id: string, formData: FormData) {
   const latitude = formData.get('latitude') ? parseFloat(formData.get('latitude') as string) : null
   const longitude = formData.get('longitude') ? parseFloat(formData.get('longitude') as string) : null
   const isActive = formData.get('is_active') !== 'false'
+  const podIdRaw = (formData.get('pod_id') as string | null)?.trim() || ''
+  const podId = podIdRaw || null
 
   const { error } = await supabase
     .from('kiosks')
@@ -106,6 +111,7 @@ export async function updateKiosk(id: string, formData: FormData) {
       latitude,
       longitude,
       is_active: isActive,
+      pod_id: podId,
     })
     .eq('id', id)
 

@@ -99,6 +99,18 @@ export const productColumns: ColumnDef<Product>[] = [
     },
   },
   {
+    accessorKey: 'cofeplus_item_code',
+    header: 'Item Code',
+    cell: ({ row }) => {
+      const code = row.original.cofeplus_item_code
+      return code ? (
+        <code className="text-xs">{code}</code>
+      ) : (
+        <span className="text-muted-foreground">—</span>
+      )
+    },
+  },
+  {
     accessorKey: 'temperature',
     header: 'Temperature',
   },

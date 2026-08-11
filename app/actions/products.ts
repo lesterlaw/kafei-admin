@@ -67,6 +67,9 @@ export async function createProduct(formData: FormData) {
   const price = parseFloat(formData.get('price') as string)
   const temperature = formData.get('temperature') as 'hot' | 'cold' | 'both' | null
   const isHidden = formData.get('is_hidden') === 'true'
+  const itemCodeRaw =
+    (formData.get('cofeplus_item_code') as string | null)?.trim() || ''
+  const cofeplusItemCode = itemCodeRaw || null
 
   const { error } = await supabase.from('products').insert({
     name,
@@ -74,6 +77,7 @@ export async function createProduct(formData: FormData) {
     price,
     temperature: temperature || null,
     is_hidden: isHidden,
+    cofeplus_item_code: cofeplusItemCode,
   })
 
   if (error) {
@@ -93,6 +97,9 @@ export async function updateProduct(id: string, formData: FormData) {
   const price = parseFloat(formData.get('price') as string)
   const temperature = formData.get('temperature') as 'hot' | 'cold' | 'both' | null
   const isHidden = formData.get('is_hidden') === 'true'
+  const itemCodeRaw =
+    (formData.get('cofeplus_item_code') as string | null)?.trim() || ''
+  const cofeplusItemCode = itemCodeRaw || null
 
   const { error } = await supabase
     .from('products')
@@ -102,6 +109,7 @@ export async function updateProduct(id: string, formData: FormData) {
       price,
       temperature: temperature || null,
       is_hidden: isHidden,
+      cofeplus_item_code: cofeplusItemCode,
     })
     .eq('id', id)
 

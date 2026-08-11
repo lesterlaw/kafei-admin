@@ -80,6 +80,19 @@ export function EditProductForm({ product }: { product: Product }) {
         />
       </div>
       <div className="space-y-2">
+        <Label htmlFor="cofeplus_item_code">CofePlus Item Code</Label>
+        <Input
+          id="cofeplus_item_code"
+          name="cofeplus_item_code"
+          placeholder="Machine menu itemCode"
+          defaultValue={product.cofeplus_item_code || ''}
+          disabled={isLoading}
+        />
+        <p className="text-xs text-muted-foreground">
+          Required for machine QR orders when the kiosk has a pod ID.
+        </p>
+      </div>
+      <div className="space-y-2">
         <Label htmlFor="temperature">Temperature</Label>
         <Select value={temperature} onValueChange={setTemperature}>
           <SelectTrigger>

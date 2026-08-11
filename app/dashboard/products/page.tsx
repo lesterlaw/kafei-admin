@@ -13,6 +13,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import { CreateProductForm } from './create-product-form'
+import { CofeplusSyncButton } from '@/components/api-test/cofeplus-sync-button'
 
 export default async function ProductsPage() {
   const products = await getProducts()
@@ -25,6 +26,7 @@ export default async function ProductsPage() {
           <p className="text-muted-foreground">Manage coffee products</p>
         </div>
         <div className="flex gap-2">
+          <CofeplusSyncButton />
           <Link href="/dashboard/products/add-ons">
             <Button variant="outline">Manage Add-ons</Button>
           </Link>

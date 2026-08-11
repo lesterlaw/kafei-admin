@@ -116,6 +116,38 @@ export async function getCoupons() {
   return data || []
 }
 
+export async function getBanners() {
+  await verifyAdmin()
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from('banners')
+    .select('*')
+    .order('sort_order', { ascending: true })
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  return data || []
+}
+
+export async function getPromoCodes() {
+  await verifyAdmin()
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from('promo_codes')
+    .select('*')
+    .order('is_system', { ascending: false })
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  return data || []
+}
+
 export async function getSupportTickets() {
   await verifyAdmin()
   const supabase = createAdminClient()

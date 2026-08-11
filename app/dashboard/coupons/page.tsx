@@ -13,12 +13,25 @@ export default async function CouponsPage() {
         <div>
           <h1 className="text-3xl font-bold">Coupon Management</h1>
           <p className="text-muted-foreground">
-            View and manage daily coupons
+            View and manage daily per-user entitlement coupons. For marketing
+            discounts and system promos, use{' '}
+            <Link
+              href="/dashboard/promo-codes"
+              className="text-primary underline-offset-4 hover:underline"
+            >
+              Promo Codes
+            </Link>
+            .
           </p>
         </div>
-        <Link href="/dashboard/coupons/redemption-history">
-          <Button variant="outline">View Redemption History</Button>
-        </Link>
+        <div className="flex gap-2">
+          <Link href="/dashboard/promo-codes">
+            <Button variant="outline">Promo Codes</Button>
+          </Link>
+          <Link href="/dashboard/coupons/redemption-history">
+            <Button variant="outline">View Redemption History</Button>
+          </Link>
+        </div>
       </div>
 
       <DataTable columns={couponColumns} data={coupons} searchKey="code" />

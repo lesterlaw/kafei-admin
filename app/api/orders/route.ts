@@ -2,6 +2,14 @@ import { NextRequest } from 'next/server'
 import { createApiResponse, createApiError, authenticateRequest } from '@/lib/api/middleware'
 import { createClient } from '@supabase/supabase-js'
 import { z } from 'zod'
+import { createPickupDispatch } from '@/lib/cofeplus/dispatch'
+import { resolveCofeplusEnvironment } from '@/lib/cofeplus/proxy'
+import {
+  findBusyMachineOrder,
+  getQueueSnapshot,
+  syncBusyOrderAndAdvanceQueue,
+  type MachineOrderRow,
+} from '@/lib/cofeplus/queue'
 
 const uuidSchema = z.string().uuid()
 
@@ -17,22 +25,22 @@ const createOrderSchema = z.object({
 
     return uuidSchema.safeParse(value).success ? value : undefined
   }, uuidSchema.optional()),
+  cofeplus_environment: z.enum(['test', 'live']).optional(),
 })
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Internal server error'
 }
 
-// Create admin client inline to ensure service role key is used
 function getAdminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-  
+
   if (!url || !serviceKey) {
     console.error('Missing Supabase credentials:', { url: !!url, serviceKey: !!serviceKey })
     throw new Error('Missing Supabase credentials')
   }
-  
+
   return createClient(url, serviceKey, {
     auth: {
       autoRefreshToken: false,
@@ -81,10 +89,11 @@ export async function POST(request: NextRequest) {
       return createApiError('Invalid order payload', 400)
     }
 
-    const { kiosk_id, product_id, addons, coupon_id } = validationResult.data
+    const { kiosk_id, product_id, addons, coupon_id, cofeplus_environment } =
+      validationResult.data
+    const environment = resolveCofeplusEnvironment(cofeplus_environment)
     const adminClient = getAdminClient()
 
-    // Verify user exists in users table
     const { data: userData, error: userError } = await adminClient
       .from('users')
       .select('id')
@@ -96,10 +105,9 @@ export async function POST(request: NextRequest) {
       return createApiError('User not found. Please complete your profile first.', 400)
     }
 
-    // Get product price
     const { data: product, error: productError } = await adminClient
       .from('products')
-      .select('price, name')
+      .select('price, name, cofeplus_item_code')
       .eq('id', product_id)
       .single()
 
@@ -108,10 +116,9 @@ export async function POST(request: NextRequest) {
       return createApiError('Product not found', 404)
     }
 
-    // Verify kiosk exists
     const { data: kiosk, error: kioskError } = await adminClient
       .from('kiosks')
-      .select('id')
+      .select('id, pod_id, name, address')
       .eq('id', kiosk_id)
       .single()
 
@@ -146,7 +153,6 @@ export async function POST(request: NextRequest) {
       validatedCouponId = coupon.id
     }
 
-    // Calculate total (add addon prices if provided)
     let total = Number(product.price)
 
     if (addons && addons.length > 0) {
@@ -160,12 +166,86 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Generate order number
+    const podId =
+      typeof kiosk.pod_id === 'string' ? kiosk.pod_id.trim() : ''
+    const itemCode =
+      typeof product.cofeplus_item_code === 'string'
+        ? product.cofeplus_item_code.trim()
+        : ''
+
+    let pickupCode: string | null = null
+    let cofeplusDispatchId: string | null = null
+    let cofeplusPodId: string | null = null
+    let cofeplusEnv: 'test' | 'live' | null = null
+    let orderStatus: 'queued' | 'pending' = 'pending'
+    let queueMeta: Awaited<ReturnType<typeof getQueueSnapshot>> | null = null
+
+    if (podId) {
+      if (!itemCode) {
+        return createApiError(
+          'This kiosk is linked to a machine, but the product has no CofePlus item code. Set cofeplus_item_code on the product in admin.',
+          400
+        )
+      }
+
+      cofeplusPodId = podId
+      cofeplusEnv = environment
+
+      // Refresh whoever currently holds the machine before deciding to queue
+      const existingBusy = await findBusyMachineOrder(
+        adminClient,
+        podId,
+        environment
+      )
+      if (existingBusy) {
+        await syncBusyOrderAndAdvanceQueue(adminClient, existingBusy)
+      }
+
+      const busy = await findBusyMachineOrder(adminClient, podId, environment)
+
+      if (busy) {
+        // Machine / dispenser still occupied — join virtual queue, no QR yet
+        orderStatus = 'queued'
+        console.log(
+          `[orders] pod=${podId} busy with order ${busy.id}; queueing new order env=${environment}`
+        )
+      } else {
+        console.log(
+          `[orders] creating CofePlus pickup dispatch pod=${podId} item=${itemCode} env=${environment}`
+        )
+
+        const dispatchResult = await createPickupDispatch({
+          podId,
+          itemCode,
+          environment,
+          displayNote: product.name,
+        })
+
+        if (!dispatchResult.ok) {
+          console.error('[orders] CofePlus dispatch failed', dispatchResult)
+          return createApiError(
+            dispatchResult.error || 'Failed to create machine pickup order',
+            502
+          )
+        }
+
+        pickupCode = dispatchResult.dispatch.pickupCode
+        cofeplusDispatchId = dispatchResult.dispatch.id
+        orderStatus = 'pending'
+      }
+    }
+
     const orderNumber = `ORD-${Date.now()}-${Math.random().toString(36).substring(2, 9).toUpperCase()}`
 
-    console.log('Inserting order:', { orderNumber, user_id: user.id, kiosk_id, total })
+    console.log('Inserting order:', {
+      orderNumber,
+      user_id: user.id,
+      kiosk_id,
+      total,
+      orderStatus,
+      pickupCode,
+    })
 
-    // Create order
     const { data: order, error: orderError } = await adminClient
       .from('orders')
       .insert({
@@ -174,9 +254,13 @@ export async function POST(request: NextRequest) {
         kiosk_id,
         coupon_id: validatedCouponId,
         total_amount: total,
-        status: 'pending',
+        status: orderStatus,
+        pickup_code: pickupCode,
+        cofeplus_dispatch_id: cofeplusDispatchId,
+        cofeplus_pod_id: cofeplusPodId,
+        cofeplus_environment: cofeplusEnv,
       })
-      .select()
+      .select('*, kiosks(*)')
       .single()
 
     if (orderError) {
@@ -186,7 +270,6 @@ export async function POST(request: NextRequest) {
 
     console.log('Order created:', order.id)
 
-    // Create order item
     const { error: itemError } = await adminClient
       .from('order_items')
       .insert({
@@ -201,13 +284,16 @@ export async function POST(request: NextRequest) {
       console.error('Order item creation error:', itemError)
     }
 
-    return createApiResponse(order)
+    if (cofeplusPodId) {
+      queueMeta = await getQueueSnapshot(adminClient, order as MachineOrderRow)
+    }
+
+    return createApiResponse({
+      ...order,
+      queue: queueMeta,
+    })
   } catch (error: unknown) {
     console.error('Order API error:', error)
     return createApiError(getErrorMessage(error), 500)
   }
 }
-
-
-
-

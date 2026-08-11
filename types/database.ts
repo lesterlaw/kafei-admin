@@ -61,6 +61,8 @@ export interface Product {
   temperature?: 'hot' | 'cold' | 'both'
   image_url?: string
   is_hidden: boolean
+  /** CofePlus menu itemCode for machine dispatch */
+  cofeplus_item_code?: string | null
   created_at: string
   updated_at: string
 }
@@ -87,8 +89,13 @@ export interface Order {
   user_id: string
   kiosk_id: string
   coupon_id?: string
-  status: 'pending' | 'brewing' | 'ready' | 'completed' | 'cancelled'
+  status: 'queued' | 'pending' | 'brewing' | 'ready' | 'completed' | 'cancelled'
   total_amount: number
+  /** CofePlus pickupCode — encode this string as the machine QR */
+  pickup_code?: string | null
+  cofeplus_dispatch_id?: string | null
+  cofeplus_pod_id?: string | null
+  cofeplus_environment?: 'test' | 'live' | null
   created_at: string
   updated_at: string
 }
@@ -130,6 +137,8 @@ export interface Kiosk {
   latitude?: number
   longitude?: number
   is_active: boolean
+  /** CofePlus machine serial / pod ID (e.g. RCK111) */
+  pod_id?: string | null
   created_at: string
   updated_at: string
 }
@@ -162,6 +171,46 @@ export interface Subpage {
   content: string
   created_at: string
   updated_at: string
+}
+
+export interface Banner {
+  id: string
+  image_url: string
+  title?: string | null
+  link_url?: string | null
+  sort_order: number
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export type PromoCodeType = 'percent' | 'fixed' | 'nth_cup' | 'referral'
+
+export interface PromoCode {
+  id: string
+  name: string
+  code?: string | null
+  type: PromoCodeType
+  discount_value: number
+  nth_cup?: number | null
+  referral_threshold?: number | null
+  validity_days?: number | null
+  min_amount: number
+  max_discount_amount?: number | null
+  max_redemptions_total?: number | null
+  max_redemptions_per_user?: number | null
+  starts_at?: string | null
+  ends_at?: string | null
+  applies_to_all_users: boolean
+  is_system: boolean
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface PromoCodeUser {
+  promo_code_id: string
+  user_id: string
 }
 
 
