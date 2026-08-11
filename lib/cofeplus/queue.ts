@@ -6,12 +6,20 @@ import {
 } from '@/lib/cofeplus/dispatch'
 import type { CofeplusEnvironment } from '@/lib/cofeplus/config'
 import { resolveCofeplusEnvironment } from '@/lib/cofeplus/proxy'
+import {
+  dispenseSecondsForEnvironment,
+  formatWaitLabel,
+  TEST_DISPENSE_SECONDS,
+} from '@/lib/cofeplus/timing'
 
 /** Orders that currently occupy the physical machine / dispenser */
 const MACHINE_BUSY_STATUSES = ['pending', 'brewing', 'ready'] as const
 
 /** Orders still waiting for their turn (no pickup QR yet) */
 const QUEUE_WAITING_STATUSES = ['queued'] as const
+
+const ORDER_SELECT =
+  'id, status, pickup_code, cofeplus_dispatch_id, cofeplus_pod_id, cofeplus_environment, machine_activated_at, created_at, order_number, user_id'
 
 export type MachineOrderRow = {
   id: string
@@ -20,6 +28,7 @@ export type MachineOrderRow = {
   cofeplus_dispatch_id: string | null
   cofeplus_pod_id: string | null
   cofeplus_environment: string | null
+  machine_activated_at?: string | null
   created_at: string
   order_number?: string
   user_id?: string
@@ -30,10 +39,39 @@ export interface QueueSnapshot {
   aheadCount: number
   isYourTurn: boolean
   totalWaiting: number
+  /** Seconds until this order is expected to start / finish its turn */
+  estimatedWaitSeconds: number
+  /** Human-readable wait label */
+  estimatedWaitLabel: string
+  /** Seconds used per drink for this environment */
+  secondsPerDrink: number
 }
 
 function asEnvironment(value: string | null | undefined): CofeplusEnvironment {
   return resolveCofeplusEnvironment(value)
+}
+
+function emptyQueue(
+  partial?: Partial<QueueSnapshot> & { environment?: CofeplusEnvironment }
+): QueueSnapshot {
+  const environment = partial?.environment || 'test'
+  const secondsPerDrink = dispenseSecondsForEnvironment(environment)
+  const estimatedWaitSeconds = partial?.estimatedWaitSeconds ?? 0
+  return {
+    position: partial?.position ?? null,
+    aheadCount: partial?.aheadCount ?? 0,
+    isYourTurn: partial?.isYourTurn ?? false,
+    totalWaiting: partial?.totalWaiting ?? 0,
+    estimatedWaitSeconds,
+    estimatedWaitLabel: formatWaitLabel(estimatedWaitSeconds),
+    secondsPerDrink,
+  }
+}
+
+function elapsedSecondsSince(iso: string | null | undefined): number {
+  if (!iso) return 0
+  const ms = Date.now() - new Date(iso).getTime()
+  return Math.max(0, Math.floor(ms / 1000))
 }
 
 /**
@@ -47,9 +85,7 @@ export async function findBusyMachineOrder(
 ): Promise<MachineOrderRow | null> {
   const { data, error } = await adminClient
     .from('orders')
-    .select(
-      'id, status, pickup_code, cofeplus_dispatch_id, cofeplus_pod_id, cofeplus_environment, created_at, order_number, user_id'
-    )
+    .select(ORDER_SELECT)
     .eq('cofeplus_pod_id', podId)
     .eq('cofeplus_environment', environment)
     .in('status', [...MACHINE_BUSY_STATUSES])
@@ -70,26 +106,38 @@ export async function getQueueSnapshot(
   order: MachineOrderRow
 ): Promise<QueueSnapshot> {
   const podId = order.cofeplus_pod_id?.trim()
+  const environment = asEnvironment(order.cofeplus_environment)
+  const secondsPerDrink = dispenseSecondsForEnvironment(environment)
+
   if (!podId) {
-    return {
-      position: null,
-      aheadCount: 0,
+    return emptyQueue({
+      environment,
       isYourTurn: Boolean(order.pickup_code),
-      totalWaiting: 0,
-    }
+      estimatedWaitSeconds: 0,
+    })
   }
 
-  const environment = asEnvironment(order.cofeplus_environment)
-
   if (order.status !== 'queued') {
-    return {
+    const isYourTurn =
+      Boolean(order.pickup_code) &&
+      MACHINE_BUSY_STATUSES.includes(
+        order.status as (typeof MACHINE_BUSY_STATUSES)[number]
+      )
+
+    let estimatedWaitSeconds = 0
+    if (isYourTurn && environment === 'test') {
+      const elapsed = elapsedSecondsSince(order.machine_activated_at)
+      estimatedWaitSeconds = Math.max(0, TEST_DISPENSE_SECONDS - elapsed)
+    }
+
+    return emptyQueue({
+      environment,
       position: order.pickup_code ? 0 : null,
       aheadCount: 0,
-      isYourTurn: Boolean(order.pickup_code) && MACHINE_BUSY_STATUSES.includes(
-        order.status as (typeof MACHINE_BUSY_STATUSES)[number]
-      ),
-      totalWaiting: 0,
-    }
+      isYourTurn,
+      estimatedWaitSeconds,
+      secondsPerDrink,
+    })
   }
 
   const { data: waiting, error } = await adminClient
@@ -102,27 +150,31 @@ export async function getQueueSnapshot(
 
   if (error || !waiting) {
     console.error('[queue] getQueueSnapshot failed', error)
-    return {
-      position: null,
-      aheadCount: 0,
-      isYourTurn: false,
-      totalWaiting: 0,
-    }
+    return emptyQueue({ environment, isYourTurn: false })
   }
 
   const index = waiting.findIndex((row) => row.id === order.id)
   const busy = await findBusyMachineOrder(adminClient, podId, environment)
-  // People ahead = queued orders before you + 1 if machine is currently busy
   const aheadInQueue = index < 0 ? 0 : index
   const aheadCount = aheadInQueue + (busy ? 1 : 0)
   const position = index < 0 ? null : aheadCount + 1
 
-  return {
+  let estimatedWaitSeconds = aheadCount * secondsPerDrink
+  if (busy && environment === 'test') {
+    const elapsed = elapsedSecondsSince(busy.machine_activated_at)
+    const busyRemaining = Math.max(0, TEST_DISPENSE_SECONDS - elapsed)
+    estimatedWaitSeconds = aheadInQueue * secondsPerDrink + busyRemaining
+  }
+
+  return emptyQueue({
+    environment,
     position,
     aheadCount,
     isYourTurn: false,
     totalWaiting: waiting.length,
-  }
+    estimatedWaitSeconds,
+    secondsPerDrink,
+  })
 }
 
 async function loadOrderItemForDispatch(
@@ -160,7 +212,7 @@ async function loadOrderItemForDispatch(
 
 /**
  * If the pod is free, activate the oldest queued order by creating its
- * CofePlus pickup dispatch (which yields the machine QR pickupCode).
+ * pickup dispatch (real CofePlus in live; simulated QR in test).
  */
 export async function tryActivateNextQueuedOrder(
   adminClient: SupabaseClient,
@@ -174,9 +226,7 @@ export async function tryActivateNextQueuedOrder(
 
   const { data: nextQueued, error } = await adminClient
     .from('orders')
-    .select(
-      'id, status, pickup_code, cofeplus_dispatch_id, cofeplus_pod_id, cofeplus_environment, created_at, order_number, user_id'
-    )
+    .select(ORDER_SELECT)
     .eq('cofeplus_pod_id', podId)
     .eq('cofeplus_environment', environment)
     .eq('status', 'queued')
@@ -203,9 +253,7 @@ export async function tryActivateNextQueuedOrder(
     .update({ status: 'pending' })
     .eq('id', nextQueued.id)
     .eq('status', 'queued')
-    .select(
-      'id, status, pickup_code, cofeplus_dispatch_id, cofeplus_pod_id, cofeplus_environment, created_at, order_number, user_id'
-    )
+    .select(ORDER_SELECT)
     .maybeSingle()
 
   if (claimError || !claimed) {
@@ -234,6 +282,7 @@ export async function tryActivateNextQueuedOrder(
     return null
   }
 
+  const activatedAt = new Date().toISOString()
   const { data: activated, error: activateError } = await adminClient
     .from('orders')
     .update({
@@ -242,11 +291,10 @@ export async function tryActivateNextQueuedOrder(
       cofeplus_dispatch_id: dispatchResult.dispatch.id,
       cofeplus_pod_id: podId,
       cofeplus_environment: environment,
+      machine_activated_at: activatedAt,
     })
     .eq('id', claimed.id)
-    .select(
-      'id, status, pickup_code, cofeplus_dispatch_id, cofeplus_pod_id, cofeplus_environment, created_at, order_number, user_id'
-    )
+    .select(ORDER_SELECT)
     .single()
 
   if (activateError || !activated) {
@@ -255,14 +303,72 @@ export async function tryActivateNextQueuedOrder(
   }
 
   console.log(
-    `[queue] activated order ${activated.id} pickup=${activated.pickup_code}`
+    `[queue] activated order ${activated.id} pickup=${activated.pickup_code} env=${environment}`
   )
   return activated as MachineOrderRow
 }
 
 /**
- * Sync the busy order's CofePlus state. When it finishes (completed/cancelled),
- * promote the next queued order for that pod.
+ * Test mode: after TEST_DISPENSE_SECONDS, mark the active order completed
+ * (no real scan). Live mode never uses this path.
+ */
+async function maybeCompleteTestDispense(
+  adminClient: SupabaseClient,
+  order: MachineOrderRow
+): Promise<MachineOrderRow> {
+  const environment = asEnvironment(order.cofeplus_environment)
+  if (environment !== 'test') {
+    return order
+  }
+
+  if (
+    !MACHINE_BUSY_STATUSES.includes(
+      order.status as (typeof MACHINE_BUSY_STATUSES)[number]
+    )
+  ) {
+    return order
+  }
+
+  const activatedAt = order.machine_activated_at || order.created_at
+  const elapsed = elapsedSecondsSince(activatedAt)
+  if (elapsed < TEST_DISPENSE_SECONDS) {
+    // Mid-simulation progress: pending → brewing after ~2s for nicer UX
+    if (elapsed >= 2 && order.status === 'pending') {
+      const { data: brewing } = await adminClient
+        .from('orders')
+        .update({ status: 'brewing' })
+        .eq('id', order.id)
+        .eq('status', 'pending')
+        .select(ORDER_SELECT)
+        .maybeSingle()
+      if (brewing) return brewing as MachineOrderRow
+    }
+    return order
+  }
+
+  console.log(
+    `[queue] test simulate complete order=${order.id} after ${elapsed}s`
+  )
+
+  const { data: completed, error } = await adminClient
+    .from('orders')
+    .update({ status: 'completed' })
+    .eq('id', order.id)
+    .in('status', [...MACHINE_BUSY_STATUSES])
+    .select(ORDER_SELECT)
+    .maybeSingle()
+
+  if (error || !completed) {
+    console.error('[queue] test simulate complete failed', error)
+    return order
+  }
+
+  return completed as MachineOrderRow
+}
+
+/**
+ * Sync the busy order's state. Live: CofePlus scan/status.
+ * Test: 5s simulated dispense then success. Then promote next queued order.
  */
 export async function syncBusyOrderAndAdvanceQueue(
   adminClient: SupabaseClient,
@@ -282,26 +388,28 @@ export async function syncBusyOrderAndAdvanceQueue(
       current.status as (typeof MACHINE_BUSY_STATUSES)[number]
     )
   ) {
-    const snapshot = await fetchDispatchSnapshot(
-      podId,
-      current.cofeplus_dispatch_id,
-      environment
-    )
+    if (environment === 'test') {
+      current = await maybeCompleteTestDispense(adminClient, current)
+    } else {
+      const snapshot = await fetchDispatchSnapshot(
+        podId,
+        current.cofeplus_dispatch_id,
+        environment
+      )
 
-    if (snapshot.ok) {
-      const nextStatus = mapDispatchStateToOrderStatus(snapshot.snapshot.state)
-      if (nextStatus !== current.status) {
-        const { data: updated, error } = await adminClient
-          .from('orders')
-          .update({ status: nextStatus })
-          .eq('id', current.id)
-          .select(
-            'id, status, pickup_code, cofeplus_dispatch_id, cofeplus_pod_id, cofeplus_environment, created_at, order_number, user_id'
-          )
-          .single()
+      if (snapshot.ok) {
+        const nextStatus = mapDispatchStateToOrderStatus(snapshot.snapshot.state)
+        if (nextStatus !== current.status) {
+          const { data: updated, error } = await adminClient
+            .from('orders')
+            .update({ status: nextStatus })
+            .eq('id', current.id)
+            .select(ORDER_SELECT)
+            .single()
 
-        if (!error && updated) {
-          current = updated as MachineOrderRow
+          if (!error && updated) {
+            current = updated as MachineOrderRow
+          }
         }
       }
     }
@@ -327,19 +435,18 @@ export async function refreshOrderQueueState(
   order: MachineOrderRow
 ): Promise<{ order: MachineOrderRow; queue: QueueSnapshot }> {
   const podId = order.cofeplus_pod_id?.trim()
+  const environment = asEnvironment(order.cofeplus_environment)
+
   if (!podId) {
     return {
       order,
-      queue: {
-        position: null,
-        aheadCount: 0,
+      queue: emptyQueue({
+        environment,
         isYourTurn: Boolean(order.pickup_code),
-        totalWaiting: 0,
-      },
+      }),
     }
   }
 
-  const environment = asEnvironment(order.cofeplus_environment)
   let current = order
 
   if (current.status === 'queued') {
@@ -353,9 +460,7 @@ export async function refreshOrderQueueState(
 
     const { data: refreshed } = await adminClient
       .from('orders')
-      .select(
-        'id, status, pickup_code, cofeplus_dispatch_id, cofeplus_pod_id, cofeplus_environment, created_at, order_number, user_id'
-      )
+      .select(ORDER_SELECT)
       .eq('id', order.id)
       .single()
 

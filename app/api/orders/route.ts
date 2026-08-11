@@ -2,12 +2,12 @@ import { NextRequest } from 'next/server'
 import { createApiResponse, createApiError, authenticateRequest } from '@/lib/api/middleware'
 import { createClient } from '@supabase/supabase-js'
 import { z } from 'zod'
-import { createPickupDispatch } from '@/lib/cofeplus/dispatch'
 import { resolveCofeplusEnvironment } from '@/lib/cofeplus/proxy'
 import {
   findBusyMachineOrder,
   getQueueSnapshot,
   syncBusyOrderAndAdvanceQueue,
+  tryActivateNextQueuedOrder,
   type MachineOrderRow,
 } from '@/lib/cofeplus/queue'
 
@@ -173,10 +173,9 @@ export async function POST(request: NextRequest) {
         ? product.cofeplus_item_code.trim()
         : ''
 
-    let pickupCode: string | null = null
-    let cofeplusDispatchId: string | null = null
     let cofeplusPodId: string | null = null
     let cofeplusEnv: 'test' | 'live' | null = null
+    // Machine orders always join the queue first; QR unlocks only on activation
     let orderStatus: 'queued' | 'pending' = 'pending'
     let queueMeta: Awaited<ReturnType<typeof getQueueSnapshot>> | null = null
 
@@ -190,8 +189,9 @@ export async function POST(request: NextRequest) {
 
       cofeplusPodId = podId
       cofeplusEnv = environment
+      orderStatus = 'queued'
 
-      // Refresh whoever currently holds the machine before deciding to queue
+      // Finish / advance whoever currently holds the machine before we join
       const existingBusy = await findBusyMachineOrder(
         adminClient,
         podId,
@@ -201,38 +201,9 @@ export async function POST(request: NextRequest) {
         await syncBusyOrderAndAdvanceQueue(adminClient, existingBusy)
       }
 
-      const busy = await findBusyMachineOrder(adminClient, podId, environment)
-
-      if (busy) {
-        // Machine / dispenser still occupied — join virtual queue, no QR yet
-        orderStatus = 'queued'
-        console.log(
-          `[orders] pod=${podId} busy with order ${busy.id}; queueing new order env=${environment}`
-        )
-      } else {
-        console.log(
-          `[orders] creating CofePlus pickup dispatch pod=${podId} item=${itemCode} env=${environment}`
-        )
-
-        const dispatchResult = await createPickupDispatch({
-          podId,
-          itemCode,
-          environment,
-          displayNote: product.name,
-        })
-
-        if (!dispatchResult.ok) {
-          console.error('[orders] CofePlus dispatch failed', dispatchResult)
-          return createApiError(
-            dispatchResult.error || 'Failed to create machine pickup order',
-            502
-          )
-        }
-
-        pickupCode = dispatchResult.dispatch.pickupCode
-        cofeplusDispatchId = dispatchResult.dispatch.id
-        orderStatus = 'pending'
-      }
+      console.log(
+        `[orders] queueing machine order pod=${podId} item=${itemCode} env=${environment}`
+      )
     }
 
     const orderNumber = `ORD-${Date.now()}-${Math.random().toString(36).substring(2, 9).toUpperCase()}`
@@ -243,7 +214,6 @@ export async function POST(request: NextRequest) {
       kiosk_id,
       total,
       orderStatus,
-      pickupCode,
     })
 
     const { data: order, error: orderError } = await adminClient
@@ -255,8 +225,8 @@ export async function POST(request: NextRequest) {
         coupon_id: validatedCouponId,
         total_amount: total,
         status: orderStatus,
-        pickup_code: pickupCode,
-        cofeplus_dispatch_id: cofeplusDispatchId,
+        pickup_code: null,
+        cofeplus_dispatch_id: null,
         cofeplus_pod_id: cofeplusPodId,
         cofeplus_environment: cofeplusEnv,
       })
@@ -284,12 +254,30 @@ export async function POST(request: NextRequest) {
       console.error('Order item creation error:', itemError)
     }
 
+    let finalOrder = order
+
     if (cofeplusPodId) {
-      queueMeta = await getQueueSnapshot(adminClient, order as MachineOrderRow)
+      // Activate next (may be this order) once line items exist for item code lookup
+      await tryActivateNextQueuedOrder(adminClient, cofeplusPodId, environment)
+
+      const { data: refreshed } = await adminClient
+        .from('orders')
+        .select('*, kiosks(*)')
+        .eq('id', order.id)
+        .single()
+
+      if (refreshed) {
+        finalOrder = refreshed
+      }
+
+      queueMeta = await getQueueSnapshot(
+        adminClient,
+        finalOrder as MachineOrderRow
+      )
     }
 
     return createApiResponse({
-      ...order,
+      ...finalOrder,
       queue: queueMeta,
     })
   } catch (error: unknown) {

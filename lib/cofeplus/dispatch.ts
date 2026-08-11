@@ -95,6 +95,40 @@ async function loadPodItem(
   }
 }
 
+/**
+ * Test-mode fake dispatch: no CofePlus call. QR is still shown so the app
+ * flow can be exercised; queue auto-completes after TEST_DISPENSE_SECONDS.
+ */
+export function createSimulatedPickupDispatch(
+  input: CreatePickupDispatchInput
+): CreatePickupDispatchResult {
+  const environment: CofeplusEnvironment = 'test'
+  const itemCode = input.itemCode.trim()
+  const stamp = Date.now().toString(36).toUpperCase()
+  const pickupCode = `KAFEI-TEST-${stamp}`
+  const dispatchId = `sim-${stamp}`
+
+  return {
+    ok: true,
+    environment,
+    dispatch: {
+      id: dispatchId,
+      orderNumber: `SIM-${stamp}`,
+      pickupCode,
+    },
+    item: {
+      itemCode,
+      display: input.displayNote || itemCode,
+      price: 0,
+      outOfStock: false,
+      offMenu: false,
+      category: 'coffee',
+      modifiers: [],
+      modifierGroups: [],
+    },
+  }
+}
+
 export async function createPickupDispatch(
   input: CreatePickupDispatchInput
 ): Promise<CreatePickupDispatchResult | CreatePickupDispatchError> {
@@ -107,6 +141,11 @@ export async function createPickupDispatch(
   }
   if (!itemCode) {
     return { ok: false, environment, error: 'Missing CofePlus item code' }
+  }
+
+  // Test mode does not wait on a real machine / scan endpoint
+  if (environment === 'test') {
+    return createSimulatedPickupDispatch(input)
   }
 
   const loaded = await loadPodItem(podId, itemCode, environment)

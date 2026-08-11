@@ -65,6 +65,9 @@ export async function GET(
           aheadCount: 0,
           isYourTurn: false,
           totalWaiting: 0,
+          estimatedWaitSeconds: 0,
+          estimatedWaitLabel: 'Ready now',
+          secondsPerDrink: 5,
         },
         message: 'Order is not linked to a CofePlus machine',
       })
@@ -88,7 +91,12 @@ export async function GET(
     )
 
     let dispatch = null
-    if (currentOrder.cofeplus_dispatch_id && currentOrder.cofeplus_pod_id) {
+    // Live: read real machine state. Test: simulated local status only.
+    if (
+      environment === 'live' &&
+      currentOrder.cofeplus_dispatch_id &&
+      currentOrder.cofeplus_pod_id
+    ) {
       const snapshot = await fetchDispatchSnapshot(
         currentOrder.cofeplus_pod_id,
         currentOrder.cofeplus_dispatch_id,
@@ -96,6 +104,20 @@ export async function GET(
       )
       if (snapshot.ok) {
         dispatch = snapshot.snapshot
+      }
+    } else if (
+      environment === 'test' &&
+      currentOrder.pickup_code &&
+      currentOrder.cofeplus_dispatch_id
+    ) {
+      dispatch = {
+        id: currentOrder.cofeplus_dispatch_id,
+        state: currentOrder.status === 'brewing' ? 'making' : currentOrder.status === 'completed' ? 'done' : currentOrder.status === 'ready' ? 'ready' : 'pending',
+        orderNumber: currentOrder.order_number || '',
+        pickupCode: currentOrder.pickup_code,
+        archived: false,
+        itemCount: 1,
+        lineItemCodes: [],
       }
     }
 
