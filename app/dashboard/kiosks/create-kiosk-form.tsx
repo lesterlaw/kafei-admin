@@ -5,6 +5,7 @@ import { createKiosk } from '@/app/actions/kiosks'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import {
   Select,
   SelectContent,
@@ -52,6 +53,19 @@ export function CreateKioskForm() {
       <div className="space-y-2">
         <Label htmlFor="address">Address</Label>
         <Input id="address" name="address" required disabled={isLoading} />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="details">Details</Label>
+        <Textarea
+          id="details"
+          name="details"
+          placeholder="e.g. Beside counter 4"
+          disabled={isLoading}
+          rows={3}
+        />
+        <p className="text-xs text-muted-foreground">
+          Shown on the app select-location screen under the address.
+        </p>
       </div>
       <div className="space-y-2">
         <Label htmlFor="pod_id">CofePlus Pod ID</Label>

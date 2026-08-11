@@ -134,6 +134,8 @@ export interface Kiosk {
   name: string
   location: string
   address: string
+  /** Free-text location note shown in the app (e.g. Beside counter 4) */
+  details?: string | null
   latitude?: number
   longitude?: number
   is_active: boolean

@@ -65,6 +65,8 @@ export async function createKiosk(formData: FormData) {
   const name = formData.get('name') as string
   const location = formData.get('location') as string
   const address = formData.get('address') as string
+  const detailsRaw = (formData.get('details') as string | null)?.trim() || ''
+  const details = detailsRaw || null
   const latitude = formData.get('latitude') ? parseFloat(formData.get('latitude') as string) : null
   const longitude = formData.get('longitude') ? parseFloat(formData.get('longitude') as string) : null
   const isActive = formData.get('is_active') !== 'false'
@@ -75,6 +77,7 @@ export async function createKiosk(formData: FormData) {
     name,
     location,
     address,
+    details,
     latitude,
     longitude,
     is_active: isActive,
@@ -96,6 +99,8 @@ export async function updateKiosk(id: string, formData: FormData) {
   const name = formData.get('name') as string
   const location = formData.get('location') as string
   const address = formData.get('address') as string
+  const detailsRaw = (formData.get('details') as string | null)?.trim() || ''
+  const details = detailsRaw || null
   const latitude = formData.get('latitude') ? parseFloat(formData.get('latitude') as string) : null
   const longitude = formData.get('longitude') ? parseFloat(formData.get('longitude') as string) : null
   const isActive = formData.get('is_active') !== 'false'
@@ -108,6 +113,7 @@ export async function updateKiosk(id: string, formData: FormData) {
       name,
       location,
       address,
+      details,
       latitude,
       longitude,
       is_active: isActive,

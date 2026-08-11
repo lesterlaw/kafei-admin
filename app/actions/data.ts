@@ -126,6 +126,11 @@ export async function getBanners() {
     .order('created_at', { ascending: false })
 
   if (error) {
+    // Missing migration / table should not crash the dashboard route
+    if (error.code === '42P01' || /does not exist/i.test(error.message)) {
+      console.error('getBanners:', error.message)
+      return []
+    }
     throw new Error(error.message)
   }
 
@@ -142,6 +147,10 @@ export async function getPromoCodes() {
     .order('created_at', { ascending: false })
 
   if (error) {
+    if (error.code === '42P01' || /does not exist/i.test(error.message)) {
+      console.error('getPromoCodes:', error.message)
+      return []
+    }
     throw new Error(error.message)
   }
 
