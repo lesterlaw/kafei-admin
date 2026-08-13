@@ -29,18 +29,24 @@ async function verifyAdmin() {
 
 export async function getBanners() {
   await verifyAdmin()
-  const supabase = createAdminClient()
-  const { data, error } = await supabase
-    .from('banners')
-    .select('*')
-    .order('sort_order', { ascending: true })
-    .order('created_at', { ascending: false })
+  try {
+    const supabase = createAdminClient()
+    const { data, error } = await supabase
+      .from('banners')
+      .select('*')
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: false })
 
-  if (error) {
-    throw new Error(error.message)
+    if (error) {
+      console.error('getBanners:', error.message)
+      return []
+    }
+
+    return data || []
+  } catch (error) {
+    console.error('getBanners:', error)
+    return []
   }
-
-  return data || []
 }
 
 export async function createBanner(formData: FormData) {

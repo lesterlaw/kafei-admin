@@ -38,6 +38,14 @@ export function EditTicketForm({ ticket }: { ticket: any }) {
           {error}
         </div>
       )}
+      {ticket.message ? (
+        <div className="space-y-1">
+          <Label>Message</Label>
+          <p className="whitespace-pre-wrap rounded-md border bg-muted/40 p-3 text-sm">
+            {ticket.message}
+          </p>
+        </div>
+      ) : null}
       <div className="space-y-2">
         <Label htmlFor="status">Ticket Status</Label>
         <Select value={status} onValueChange={setStatus}>

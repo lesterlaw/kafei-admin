@@ -2,7 +2,6 @@
 
 import { ColumnDef } from '@tanstack/react-table'
 import { Badge } from '@/components/ui/badge'
-import Link from 'next/link'
 
 export const transactionColumns: ColumnDef<any>[] = [
   {
@@ -10,12 +9,9 @@ export const transactionColumns: ColumnDef<any>[] = [
     header: 'Transaction ID',
     cell: ({ row }) => {
       return (
-        <Link
-          href={`/dashboard/transactions/${row.original.id}`}
-          className="text-primary hover:underline"
-        >
+        <span className="font-mono text-sm">
           {row.original.id.slice(0, 8)}...
-        </Link>
+        </span>
       )
     },
   },

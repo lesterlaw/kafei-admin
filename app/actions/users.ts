@@ -52,6 +52,9 @@ export async function getUserById(id: string) {
     .single()
 
   if (error) {
+    if (error.code === 'PGRST116') {
+      return null
+    }
     throw new Error(error.message)
   }
 

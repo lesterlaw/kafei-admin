@@ -58,6 +58,47 @@ export async function getProductById(id: string) {
   return data
 }
 
+async function resolveProductImageUrl(
+  supabase: ReturnType<typeof createAdminClient>,
+  formData: FormData,
+  existingUrl?: string | null
+) {
+  const file = formData.get('image')
+  const urlField = ((formData.get('image_url') as string) || '').trim()
+
+  if (file instanceof File && file.size > 0) {
+    await supabase.storage.createBucket('product-images', { public: true }).then(
+      () => undefined,
+      () => undefined
+    )
+
+    const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg'
+    const path = `${crypto.randomUUID()}.${ext}`
+    const buffer = Buffer.from(await file.arrayBuffer())
+    const { error } = await supabase.storage
+      .from('product-images')
+      .upload(path, buffer, {
+        contentType: file.type || 'image/jpeg',
+        upsert: false,
+      })
+
+    if (error) {
+      throw new Error(
+        `Image upload failed: ${error.message}. You can also paste an image URL instead.`
+      )
+    }
+
+    const { data } = supabase.storage.from('product-images').getPublicUrl(path)
+    return data.publicUrl
+  }
+
+  if (urlField) {
+    return urlField
+  }
+
+  return existingUrl || null
+}
+
 export async function createProduct(formData: FormData) {
   await verifyAdmin()
   const supabase = createAdminClient()
@@ -71,6 +112,13 @@ export async function createProduct(formData: FormData) {
     (formData.get('cofeplus_item_code') as string | null)?.trim() || ''
   const cofeplusItemCode = itemCodeRaw || null
 
+  let imageUrl: string | null = null
+  try {
+    imageUrl = await resolveProductImageUrl(supabase, formData)
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Image upload failed' }
+  }
+
   const { error } = await supabase.from('products').insert({
     name,
     description,
@@ -78,6 +126,7 @@ export async function createProduct(formData: FormData) {
     temperature: temperature || null,
     is_hidden: isHidden,
     cofeplus_item_code: cofeplusItemCode,
+    image_url: imageUrl,
   })
 
   if (error) {
@@ -101,6 +150,22 @@ export async function updateProduct(id: string, formData: FormData) {
     (formData.get('cofeplus_item_code') as string | null)?.trim() || ''
   const cofeplusItemCode = itemCodeRaw || null
 
+  let imageUrl: string | null = null
+  try {
+    const { data: existing } = await supabase
+      .from('products')
+      .select('image_url')
+      .eq('id', id)
+      .single()
+    imageUrl = await resolveProductImageUrl(
+      supabase,
+      formData,
+      existing?.image_url || null
+    )
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Image upload failed' }
+  }
+
   const { error } = await supabase
     .from('products')
     .update({
@@ -110,6 +175,7 @@ export async function updateProduct(id: string, formData: FormData) {
       temperature: temperature || null,
       is_hidden: isHidden,
       cofeplus_item_code: cofeplusItemCode,
+      image_url: imageUrl,
     })
     .eq('id', id)
 

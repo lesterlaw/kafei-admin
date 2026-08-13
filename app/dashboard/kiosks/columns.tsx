@@ -5,7 +5,6 @@ import { Kiosk } from '@/types/database'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Pencil, Trash2 } from 'lucide-react'
-import Link from 'next/link'
 import { deleteKiosk } from '@/app/actions/kiosks'
 import {
   AlertDialog,
@@ -80,16 +79,6 @@ export const kioskColumns: ColumnDef<Kiosk>[] = [
   {
     accessorKey: 'name',
     header: 'Name',
-    cell: ({ row }) => {
-      return (
-        <Link
-          href={`/dashboard/kiosks/${row.original.id}`}
-          className="text-primary hover:underline"
-        >
-          {row.getValue('name')}
-        </Link>
-      )
-    },
   },
   {
     accessorKey: 'location',

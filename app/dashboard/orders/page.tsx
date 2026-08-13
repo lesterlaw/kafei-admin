@@ -16,7 +16,12 @@ export default async function OrdersPage() {
         <ExportOrdersButton orders={orders} />
       </div>
 
-      <DataTable columns={orderColumns} data={orders} searchKey="order_number" />
+      <DataTable
+        columns={orderColumns}
+        data={orders}
+        searchKey="order_number"
+        getRowHref={(order) => `/dashboard/orders/${order.id}`}
+      />
     </div>
   )
 }

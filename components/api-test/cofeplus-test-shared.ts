@@ -395,6 +395,50 @@ export function modifierExtraTotal(modifiers: DispatchModifier[]) {
   return modifiers.reduce((sum, modifier) => sum + (modifier.price || 0), 0)
 }
 
+export function podItemFromCacheRow(row: {
+  item_code?: string
+  display?: string
+  category?: string | null
+  price?: number | string | null
+  out_of_stock?: boolean | null
+  modifiers?: unknown
+  raw?: unknown
+}): PodItemOption | null {
+  const raw = row.raw
+  if (raw && typeof raw === 'object') {
+    const item = raw as Partial<PodItemOption>
+    if (typeof item.itemCode === 'string' && item.itemCode && Array.isArray(item.modifiers)) {
+      return {
+        itemCode: item.itemCode,
+        display: item.display || row.display || item.itemCode,
+        price: Number(item.price ?? row.price) || 0,
+        outOfStock: item.outOfStock === true || row.out_of_stock === true,
+        offMenu: item.offMenu === true,
+        category: item.category || row.category || 'Menu',
+        modifiers: item.modifiers,
+        modifierGroups: Array.isArray(item.modifierGroups) ? item.modifierGroups : [],
+      }
+    }
+
+    const mapped = mapRawItem(raw, row.category || 'Menu')
+    if (mapped) return mapped
+  }
+
+  const itemCode = row.item_code?.trim() || ''
+  if (!itemCode) return null
+
+  return {
+    itemCode,
+    display: row.display?.trim() || itemCode,
+    price: Number(row.price) || 0,
+    outOfStock: row.out_of_stock === true,
+    offMenu: false,
+    category: row.category || 'Menu',
+    modifiers: Array.isArray(row.modifiers) ? (row.modifiers as DispatchModifier[]) : [],
+    modifierGroups: [],
+  }
+}
+
 function mapRawItem(
   rawItem: unknown,
   category: string

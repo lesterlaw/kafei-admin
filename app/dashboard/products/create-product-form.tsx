@@ -59,6 +59,23 @@ export function CreateProductForm() {
         />
       </div>
       <div className="space-y-2">
+        <Label htmlFor="image">Product Image</Label>
+        <Input
+          id="image"
+          name="image"
+          type="file"
+          accept="image/*"
+          disabled={isLoading}
+        />
+        <Input
+          id="image_url"
+          name="image_url"
+          type="url"
+          placeholder="Or paste an image URL"
+          disabled={isLoading}
+        />
+      </div>
+      <div className="space-y-2">
         <Label htmlFor="price">Price</Label>
         <Input
           id="price"

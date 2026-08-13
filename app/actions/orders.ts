@@ -52,6 +52,9 @@ export async function getOrderById(id: string) {
     .single()
 
   if (error) {
+    if (error.code === 'PGRST116') {
+      return null
+    }
     throw new Error(error.message)
   }
 
@@ -71,6 +74,7 @@ export async function updateOrderStatus(id: string, status: string) {
   }
 
   revalidatePath('/dashboard/orders')
+  revalidatePath(`/dashboard/orders/${id}`)
   return { success: true }
 }
 

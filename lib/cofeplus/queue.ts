@@ -19,7 +19,10 @@ const MACHINE_BUSY_STATUSES = ['pending', 'brewing', 'ready'] as const
 const QUEUE_WAITING_STATUSES = ['queued'] as const
 
 const ORDER_SELECT =
-  'id, status, pickup_code, cofeplus_dispatch_id, cofeplus_pod_id, cofeplus_environment, machine_activated_at, created_at, order_number, user_id'
+  'id, status, pickup_code, cofeplus_dispatch_id, cofeplus_pod_id, cofeplus_environment, machine_activated_at, created_at, order_number, user_id, kiosk_id'
+
+/** Ignore in-flight CofePlus calls for this long before retrying a stuck pending order */
+const ACTIVATION_RETRY_SECONDS = 20
 
 export type MachineOrderRow = {
   id: string
@@ -32,6 +35,7 @@ export type MachineOrderRow = {
   created_at: string
   order_number?: string
   user_id?: string
+  kiosk_id?: string
 }
 
 export interface QueueSnapshot {
@@ -177,37 +181,155 @@ export async function getQueueSnapshot(
   })
 }
 
+export function syntheticPodIdForKiosk(kioskId: string) {
+  return `kiosk-${kioskId}`
+}
+
 async function loadOrderItemForDispatch(
   adminClient: SupabaseClient,
-  orderId: string
+  orderId: string,
+  environment: CofeplusEnvironment
 ): Promise<{ itemCode: string; displayNote: string } | null> {
   const { data, error } = await adminClient
     .from('order_items')
-    .select('products(name, cofeplus_item_code)')
+    .select('product_id, products(name, cofeplus_item_code)')
     .eq('order_id', orderId)
     .limit(1)
     .maybeSingle()
 
-  if (error || !data) {
+  if (error) {
     console.error('[queue] loadOrderItemForDispatch failed', error)
-    return null
   }
 
-  const products = data.products as
+  const products = data?.products as
     | { name?: string; cofeplus_item_code?: string | null }
     | { name?: string; cofeplus_item_code?: string | null }[]
     | null
 
   const product = Array.isArray(products) ? products[0] : products
   const itemCode = product?.cofeplus_item_code?.trim() || ''
-  if (!itemCode) {
-    return null
+  const displayNote = product?.name?.trim() || itemCode || 'Your drink'
+
+  if (itemCode) {
+    return { itemCode, displayNote }
   }
 
-  return {
-    itemCode,
-    displayNote: product?.name?.trim() || itemCode,
+  // Test mode still needs a QR so checkout can be exercised without admin mapping
+  if (environment === 'test') {
+    return { itemCode: 'TEST-ITEM', displayNote }
   }
+
+  return null
+}
+
+async function persistPickupForOrder(
+  adminClient: SupabaseClient,
+  order: MachineOrderRow,
+  podId: string,
+  environment: CofeplusEnvironment
+): Promise<{ order: MachineOrderRow; error?: string }> {
+  const item = await loadOrderItemForDispatch(adminClient, order.id, environment)
+  if (!item) {
+    return {
+      order,
+      error:
+        'This drink is missing a CofePlus item code. Set it on the product in admin.',
+    }
+  }
+
+  console.log(
+    `[queue] activating order ${order.id} pod=${podId} env=${environment} item=${item.itemCode}`
+  )
+
+  const dispatchResult = await createPickupDispatch({
+    podId,
+    itemCode: item.itemCode,
+    environment,
+    displayNote: item.displayNote,
+    adminClient,
+  })
+
+  if (!dispatchResult.ok) {
+    console.error('[queue] dispatch failed', dispatchResult)
+    return { order, error: dispatchResult.error }
+  }
+
+  const { data: activated, error: activateError } = await adminClient
+    .from('orders')
+    .update({
+      status: 'pending',
+      pickup_code: dispatchResult.dispatch.pickupCode,
+      cofeplus_dispatch_id: dispatchResult.dispatch.id,
+      cofeplus_pod_id: podId,
+      cofeplus_environment: environment,
+      machine_activated_at: new Date().toISOString(),
+    })
+    .eq('id', order.id)
+    .is('pickup_code', null)
+    .select(ORDER_SELECT)
+    .maybeSingle()
+
+  if (activateError) {
+    console.error('[queue] failed to persist activated dispatch', activateError)
+    return { order, error: activateError.message }
+  }
+
+  if (!activated) {
+    const { data: current } = await adminClient
+      .from('orders')
+      .select(ORDER_SELECT)
+      .eq('id', order.id)
+      .single()
+    return { order: (current as MachineOrderRow) || order }
+  }
+
+  console.log(
+    `[queue] activated order ${activated.id} pickup=${activated.pickup_code} env=${environment}`
+  )
+  return { order: activated as MachineOrderRow }
+}
+
+/**
+ * Mint a pickup QR for a machine order that is pending/ready but never got a
+ * pickup_code (failed dispatch, missing pod at create time, or mid-claim).
+ */
+async function recoverStuckPendingOrder(
+  adminClient: SupabaseClient,
+  order: MachineOrderRow,
+  podId: string,
+  environment: CofeplusEnvironment
+): Promise<{ order: MachineOrderRow; error?: string }> {
+  if (order.pickup_code || order.cofeplus_dispatch_id) {
+    return { order }
+  }
+
+  const busy = await findBusyMachineOrder(adminClient, podId, environment)
+  if (busy && busy.id !== order.id) {
+    if (order.status !== 'queued') {
+      const { data: queued } = await adminClient
+        .from('orders')
+        .update({ status: 'queued' })
+        .eq('id', order.id)
+        .is('pickup_code', null)
+        .select(ORDER_SELECT)
+        .maybeSingle()
+      if (queued) {
+        return { order: queued as MachineOrderRow }
+      }
+    }
+    return { order }
+  }
+
+  const claimedAgo = elapsedSecondsSince(order.machine_activated_at)
+  const inFlight =
+    order.status === 'pending' &&
+    Boolean(order.machine_activated_at) &&
+    claimedAgo < ACTIVATION_RETRY_SECONDS
+  if (inFlight) {
+    return { order }
+  }
+
+  return persistPickupForOrder(adminClient, order, podId, environment)
 }
 
 /**
@@ -239,7 +361,11 @@ export async function tryActivateNextQueuedOrder(
     return null
   }
 
-  const item = await loadOrderItemForDispatch(adminClient, nextQueued.id)
+  const item = await loadOrderItemForDispatch(
+    adminClient,
+    nextQueued.id,
+    environment
+  )
   if (!item) {
     console.error(
       `[queue] cannot activate order ${nextQueued.id}: missing product item code`
@@ -250,7 +376,10 @@ export async function tryActivateNextQueuedOrder(
   // Claim the slot before calling CofePlus to reduce double-activate races
   const { data: claimed, error: claimError } = await adminClient
     .from('orders')
-    .update({ status: 'pending' })
+    .update({
+      status: 'pending',
+      machine_activated_at: new Date().toISOString(),
+    })
     .eq('id', nextQueued.id)
     .eq('status', 'queued')
     .select(ORDER_SELECT)
@@ -261,51 +390,24 @@ export async function tryActivateNextQueuedOrder(
     return null
   }
 
-  console.log(
-    `[queue] activating order ${claimed.id} pod=${podId} env=${environment} item=${item.itemCode}`
+  const persisted = await persistPickupForOrder(
+    adminClient,
+    claimed as MachineOrderRow,
+    podId,
+    environment
   )
 
-  const dispatchResult = await createPickupDispatch({
-    podId,
-    itemCode: item.itemCode,
-    environment,
-    displayNote: item.displayNote,
-  })
-
-  if (!dispatchResult.ok) {
-    console.error('[queue] dispatch failed; reverting to queued', dispatchResult)
+  if (persisted.error && !persisted.order.pickup_code) {
     await adminClient
       .from('orders')
-      .update({ status: 'queued' })
+      .update({ status: 'queued', machine_activated_at: null })
       .eq('id', claimed.id)
       .eq('status', 'pending')
+      .is('pickup_code', null)
     return null
   }
 
-  const activatedAt = new Date().toISOString()
-  const { data: activated, error: activateError } = await adminClient
-    .from('orders')
-    .update({
-      status: 'pending',
-      pickup_code: dispatchResult.dispatch.pickupCode,
-      cofeplus_dispatch_id: dispatchResult.dispatch.id,
-      cofeplus_pod_id: podId,
-      cofeplus_environment: environment,
-      machine_activated_at: activatedAt,
-    })
-    .eq('id', claimed.id)
-    .select(ORDER_SELECT)
-    .single()
-
-  if (activateError || !activated) {
-    console.error('[queue] failed to persist activated dispatch', activateError)
-    return null
-  }
-
-  console.log(
-    `[queue] activated order ${activated.id} pickup=${activated.pickup_code} env=${environment}`
-  )
-  return activated as MachineOrderRow
+  return persisted.order
 }
 
 /**
@@ -433,7 +535,11 @@ export async function syncBusyOrderAndAdvanceQueue(
 export async function refreshOrderQueueState(
   adminClient: SupabaseClient,
   order: MachineOrderRow
-): Promise<{ order: MachineOrderRow; queue: QueueSnapshot }> {
+): Promise<{
+  order: MachineOrderRow
+  queue: QueueSnapshot
+  activationError?: string
+}> {
   const podId = order.cofeplus_pod_id?.trim()
   const environment = asEnvironment(order.cofeplus_environment)
 
@@ -444,10 +550,21 @@ export async function refreshOrderQueueState(
         environment,
         isYourTurn: Boolean(order.pickup_code),
       }),
+      activationError: order.pickup_code
+        ? undefined
+        : 'This kiosk is not linked to a CofePlus machine',
     }
   }
 
   let current = order
+  let activationError: string | undefined
+
+  const needsPickup =
+    !current.pickup_code &&
+    !current.cofeplus_dispatch_id &&
+    MACHINE_BUSY_STATUSES.includes(
+      current.status as (typeof MACHINE_BUSY_STATUSES)[number]
+    )
 
   if (current.status === 'queued') {
     // Keep advancing the pod queue (sync whoever is busy, then maybe activate us)
@@ -467,6 +584,15 @@ export async function refreshOrderQueueState(
     if (refreshed) {
       current = refreshed as MachineOrderRow
     }
+  } else if (needsPickup) {
+    const recovered = await recoverStuckPendingOrder(
+      adminClient,
+      current,
+      podId,
+      environment
+    )
+    current = recovered.order
+    activationError = recovered.error
   } else if (
     current.cofeplus_dispatch_id &&
     MACHINE_BUSY_STATUSES.includes(
@@ -485,5 +611,5 @@ export async function refreshOrderQueueState(
     }
   }
 
-  return { order: current, queue }
+  return { order: current, queue, activationError }
 }

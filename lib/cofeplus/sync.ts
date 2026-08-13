@@ -2,9 +2,9 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { CofeplusEnvironment } from '@/lib/cofeplus/config'
 import { executeCofeplusRequest } from '@/lib/cofeplus/proxy'
 import {
-  mergeModifiersFromItems,
   parsePodItems,
   parsePods,
+  podItemFromCacheRow,
   type PodItemOption,
   type PodSummary,
 } from '@/components/api-test/cofeplus-test-shared'
@@ -28,11 +28,14 @@ export interface SyncCatalogResult {
   error?: string
 }
 
+const MENU_FETCH_TIMEOUT_MS = 12_000
+
 async function fetchPods(environment: CofeplusEnvironment): Promise<PodSummary[]> {
   const response = await executeCofeplusRequest({
     method: 'GET',
     path: '/partner/v1/pods',
     environment,
+    timeoutMs: MENU_FETCH_TIMEOUT_MS,
   })
   if (!response.ok) {
     throw new Error(`List pods failed (${response.status}): ${response.body.slice(0, 240)}`)
@@ -44,42 +47,73 @@ async function fetchPodMenu(
   environment: CofeplusEnvironment,
   podId: string
 ): Promise<PodItemOption[]> {
-  const [menuRes, itemsRes] = await Promise.all([
-    executeCofeplusRequest({
-      method: 'GET',
-      path: `/partner/v1/pods/${encodeURIComponent(podId)}/menu`,
-      environment,
-    }),
-    executeCofeplusRequest({
-      method: 'GET',
-      path: `/partner/v1/pods/${encodeURIComponent(podId)}/items`,
-      environment,
-    }),
-  ])
+  const menuRes = await executeCofeplusRequest({
+    method: 'GET',
+    path: `/partner/v1/pods/${encodeURIComponent(podId)}/menu`,
+    query: { lang: 'en' },
+    environment,
+    timeoutMs: MENU_FETCH_TIMEOUT_MS,
+  })
 
   let menuItems: PodItemOption[] = []
-  let flatItems: PodItemOption[] = []
-
   if (menuRes.ok) {
     try {
       menuItems = parsePodItems(menuRes.body)
     } catch (err) {
       console.error('[cofeplus-sync] parse menu failed', err)
     }
-  }
-
-  if (itemsRes.ok) {
-    try {
-      flatItems = parsePodItems(itemsRes.body)
-    } catch (err) {
-      console.error('[cofeplus-sync] parse items failed', err)
-    }
+  } else {
+    console.warn(
+      `[cofeplus-sync] menu fetch ${menuRes.status} for ${podId}: ${menuRes.body.slice(0, 160)}`
+    )
   }
 
   if (menuItems.length > 0) {
-    return mergeModifiersFromItems(menuItems, flatItems)
+    return menuItems
   }
-  return flatItems
+
+  const itemsRes = await executeCofeplusRequest({
+    method: 'GET',
+    path: `/partner/v1/pods/${encodeURIComponent(podId)}/items`,
+    query: { lang: 'en' },
+    environment,
+    timeoutMs: MENU_FETCH_TIMEOUT_MS,
+  })
+
+  if (!itemsRes.ok) {
+    throw new Error(
+      `Menu sync failed for ${podId} (menu ${menuRes.status}, items ${itemsRes.status})`
+    )
+  }
+
+  try {
+    return parsePodItems(itemsRes.body)
+  } catch (err) {
+    console.error('[cofeplus-sync] parse items failed', err)
+    return []
+  }
+}
+
+export async function loadSyncedPodItem(
+  adminClient: SupabaseClient,
+  podId: string,
+  itemCode: string,
+  environment: CofeplusEnvironment
+): Promise<PodItemOption | null> {
+  const { data, error } = await adminClient
+    .from('cofeplus_menu_items')
+    .select('item_code, display, category, price, out_of_stock, modifiers, raw')
+    .eq('environment', environment)
+    .eq('pod_id', podId)
+    .eq('item_code', itemCode)
+    .maybeSingle()
+
+  if (error) {
+    console.error('[cofeplus-sync] loadSyncedPodItem failed', error)
+    return null
+  }
+  if (!data) return null
+  return podItemFromCacheRow(data)
 }
 
 async function upsertPodsCache(
@@ -148,6 +182,35 @@ async function upsertKiosksFromPods(
   adminClient: SupabaseClient,
   pods: PodSummary[]
 ) {
+  if (pods.length === 0) return 0
+
+  const { data: existingKiosks, error: listError } = await adminClient
+    .from('kiosks')
+    .select('id, pod_id')
+
+  if (listError) {
+    throw new Error(`Failed to load kiosks: ${listError.message}`)
+  }
+
+  // One machine: stamp that pod onto existing locations instead of creating a
+  // new kiosk named after the CofePlus pod.
+  if ((existingKiosks?.length || 0) > 0 && pods.length === 1) {
+    const podId = pods[0].podId
+    let upserted = 0
+    for (const kiosk of existingKiosks || []) {
+      if (kiosk.pod_id === podId) {
+        upserted += 1
+        continue
+      }
+      const { error } = await adminClient
+        .from('kiosks')
+        .update({ pod_id: podId, is_active: true })
+        .eq('id', kiosk.id)
+      if (!error) upserted += 1
+    }
+    return upserted
+  }
+
   let upserted = 0
 
   for (const pod of pods) {
@@ -158,15 +221,7 @@ async function upsertKiosksFromPods(
       .maybeSingle()
 
     if (existing) {
-      const { error } = await adminClient
-        .from('kiosks')
-        .update({
-          name: pod.display || pod.podId,
-          location: pod.display || pod.podId,
-          is_active: true,
-        })
-        .eq('id', existing.id)
-      if (!error) upserted += 1
+      upserted += 1
       continue
     }
 
@@ -183,17 +238,8 @@ async function upsertKiosksFromPods(
   return upserted
 }
 
-function guessTemperature(
-  display: string,
-  category: string
-): 'hot' | 'cold' | 'both' | null {
-  const text = `${display} ${category}`.toLowerCase()
-  const isIced = /\b(iced|ice|cold|frappe|frappé)\b/.test(text)
-  const isHot = /\b(hot|warm)\b/.test(text)
-  if (isIced && isHot) return 'both'
-  if (isIced) return 'cold'
-  if (isHot) return 'hot'
-  return null
+function normalizeProductName(name: string) {
+  return name.trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
 async function upsertProductsFromItems(
@@ -203,38 +249,44 @@ async function upsertProductsFromItems(
   let upserted = 0
   const seen = new Set<string>()
 
+  const { data: existingProducts, error: listError } = await adminClient
+    .from('products')
+    .select('id, name, cofeplus_item_code')
+
+  if (listError) {
+    throw new Error(`Failed to load products: ${listError.message}`)
+  }
+
+  const byCode = new Map<string, { id: string; name: string; cofeplus_item_code: string | null }>()
+  const byName = new Map<string, { id: string; name: string; cofeplus_item_code: string | null }>()
+  for (const product of existingProducts || []) {
+    if (product.cofeplus_item_code) {
+      byCode.set(product.cofeplus_item_code, product)
+    }
+    byName.set(normalizeProductName(product.name), product)
+  }
+
   for (const item of items) {
     if (!item.itemCode || seen.has(item.itemCode)) continue
     seen.add(item.itemCode)
 
-    const { data: existing } = await adminClient
-      .from('products')
-      .select('id')
-      .eq('cofeplus_item_code', item.itemCode)
-      .maybeSingle()
-
-    const payload = {
-      name: item.display,
-      description: item.category
-        ? `${item.category} · synced from CofePlus`
-        : 'Synced from CofePlus',
-      price: Number(item.price) || 0,
-      temperature: guessTemperature(item.display, item.category),
-      is_hidden: item.outOfStock || item.offMenu,
-      cofeplus_item_code: item.itemCode,
-    }
+    const existing =
+      byCode.get(item.itemCode) || byName.get(normalizeProductName(item.display))
 
     if (existing) {
       const { error } = await adminClient
         .from('products')
-        .update(payload)
+        .update({ cofeplus_item_code: item.itemCode })
         .eq('id', existing.id)
-      if (!error) upserted += 1
+      if (!error) {
+        upserted += 1
+        byCode.set(item.itemCode, { ...existing, cofeplus_item_code: item.itemCode })
+      }
       continue
     }
 
-    const { error } = await adminClient.from('products').insert(payload)
-    if (!error) upserted += 1
+    // Leave unmatched CofePlus drinks in cofeplus_menu_items only.
+    // The Kafei product catalog stays curated; dispatch reads the synced cache.
   }
 
   return upserted

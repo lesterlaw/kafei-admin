@@ -29,7 +29,7 @@ import type { CofeplusEnvironment } from '@/lib/cofeplus/config'
  */
 export function CofeplusSyncButton({
   defaultEnvironment = 'test',
-  defaultPodId = '',
+  defaultPodId = 'RCK111',
 }: {
   defaultEnvironment?: CofeplusEnvironment
   defaultPodId?: string

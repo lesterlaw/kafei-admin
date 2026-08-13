@@ -95,6 +95,21 @@ export const ticketColumns: ColumnDef<any>[] = [
     header: 'User',
   },
   {
+    accessorKey: 'message',
+    header: 'Message',
+    cell: ({ row }) => {
+      const message = String(row.original.message || '')
+      if (!message) {
+        return <span className="text-muted-foreground">—</span>
+      }
+      return (
+        <span className="block max-w-[280px] truncate" title={message}>
+          {message}
+        </span>
+      )
+    },
+  },
+  {
     accessorKey: 'status',
     header: 'Status',
     cell: ({ row }) => {

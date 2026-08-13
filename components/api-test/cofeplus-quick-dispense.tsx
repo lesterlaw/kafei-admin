@@ -13,6 +13,7 @@ import {
   Square,
 } from 'lucide-react'
 import { proxyCofeplusRequest } from '@/app/actions/cofeplus'
+import { getOrSyncCofeplusMenu } from '@/app/actions/cofeplus-sync'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -36,12 +37,10 @@ import {
   TERMINAL_DISPATCH_STATES,
   buildDispatchBody,
   isDispatchArchivedError,
-  mergeModifiersFromItems,
   parseCreateDispatch,
   parseDispatchSnapshot,
   parseDispatchState,
-  parsePodItems,
-  parsePods,
+  podItemFromCacheRow,
   type ConnectionState,
   type CreateDispatchResult,
   type PodItemOption,
@@ -242,37 +241,22 @@ export function CofeplusQuickDispense({
     setBusy('menu')
     setError(null)
     try {
-      const podsResponse = await request('List pods', {
-        method: 'GET',
-        path: '/partner/v1/pods',
+      const result = await getOrSyncCofeplusMenu({
+        environment: connection.environment,
+        podId: targetPodId.trim(),
       })
-      if (podsResponse.ok) {
-        setPods(parsePods(podsResponse.body))
-      }
+      const nextPods: PodSummary[] = result.pods.map((pod) => ({
+        podId: pod.pod_id,
+        display: pod.display || pod.pod_id,
+      }))
+      setPods(nextPods)
 
-      const [menuRes, itemsRes] = await Promise.all([
-        request('Fetch menu', {
-          method: 'GET',
-          path: `/partner/v1/pods/${encodeURIComponent(targetPodId)}/menu`,
-        }),
-        request('Fetch items', {
-          method: 'GET',
-          path: `/partner/v1/pods/${encodeURIComponent(targetPodId)}/items`,
-        }),
-      ])
-
-      let menuItems: PodItemOption[] = []
-      let flatItems: PodItemOption[] = []
-      if (menuRes.ok) menuItems = parsePodItems(menuRes.body)
-      if (itemsRes.ok) flatItems = parsePodItems(itemsRes.body)
-
-      const merged =
-        menuItems.length > 0
-          ? mergeModifiersFromItems(menuItems, flatItems)
-          : flatItems
+      const merged = result.items
+        .map((row) => podItemFromCacheRow(row))
+        .filter((item): item is PodItemOption => item !== null)
 
       if (merged.length === 0) {
-        throw new Error('No sellable items returned for this pod')
+        throw new Error('No sellable items in the synced menu for this pod')
       }
 
       setItems(merged)

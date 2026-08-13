@@ -48,7 +48,12 @@ export default async function UsersPage() {
         </div>
       </div>
 
-      <DataTable columns={userColumns} data={users} searchKey="email" />
+      <DataTable
+        columns={userColumns}
+        data={users}
+        searchKey="email"
+        getRowHref={(user) => `/dashboard/users/${user.id}`}
+      />
     </div>
   )
 }

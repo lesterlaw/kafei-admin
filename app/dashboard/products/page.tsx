@@ -37,7 +37,7 @@ export default async function ProductsPage() {
                 Create Product
               </Button>
             </DialogTrigger>
-            <DialogContent>
+            <DialogContent className="max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>Create New Product</DialogTitle>
                 <DialogDescription>

@@ -9,8 +9,11 @@ import { fetchDispatchSnapshot } from '@/lib/cofeplus/dispatch'
 import { resolveCofeplusEnvironment } from '@/lib/cofeplus/proxy'
 import {
   refreshOrderQueueState,
+  syntheticPodIdForKiosk,
   type MachineOrderRow,
 } from '@/lib/cofeplus/queue'
+
+const ORDER_DETAIL_SELECT = '*, kiosks(*), order_items(*, products(*))'
 
 function getAdminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -32,6 +35,14 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Internal server error'
 }
 
+function kioskFromOrder(order: {
+  kiosks?: { pod_id?: string | null; id?: string } | { pod_id?: string | null; id?: string }[] | null
+  kiosk_id?: string
+}) {
+  const raw = order.kiosks
+  return Array.isArray(raw) ? raw[0] : raw
+}
+
 export async function GET(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
@@ -47,7 +58,7 @@ export async function GET(
 
     const { data: order, error } = await adminClient
       .from('orders')
-      .select('*, kiosks(*)')
+      .select(ORDER_DETAIL_SELECT)
       .eq('id', id)
       .eq('user_id', user.id)
       .single()
@@ -56,7 +67,42 @@ export async function GET(
       return createApiError('Order not found', 404)
     }
 
-    if (!order.cofeplus_pod_id) {
+    const environment = resolveCofeplusEnvironment(order.cofeplus_environment)
+    const kiosk = kioskFromOrder(order)
+    const kioskPod =
+      typeof kiosk?.pod_id === 'string' ? kiosk.pod_id.trim() : ''
+    const linkedPod =
+      (typeof order.cofeplus_pod_id === 'string' && order.cofeplus_pod_id.trim()) ||
+      kioskPod ||
+      (environment === 'test' && order.kiosk_id
+        ? syntheticPodIdForKiosk(order.kiosk_id)
+        : '')
+
+    let machineOrder = order as MachineOrderRow
+
+    if (linkedPod && !order.cofeplus_pod_id) {
+      const { data: linked } = await adminClient
+        .from('orders')
+        .update({
+          cofeplus_pod_id: linkedPod,
+          cofeplus_environment: environment,
+        })
+        .eq('id', order.id)
+        .select(ORDER_DETAIL_SELECT)
+        .single()
+
+      if (linked) {
+        machineOrder = linked as MachineOrderRow
+      } else {
+        machineOrder = {
+          ...order,
+          cofeplus_pod_id: linkedPod,
+          cofeplus_environment: environment,
+        } as MachineOrderRow
+      }
+    }
+
+    if (!machineOrder.cofeplus_pod_id) {
       return createApiResponse({
         order,
         dispatch: null,
@@ -66,53 +112,61 @@ export async function GET(
           isYourTurn: false,
           totalWaiting: 0,
           estimatedWaitSeconds: 0,
-          estimatedWaitLabel: 'Ready now',
-          secondsPerDrink: 5,
+          estimatedWaitLabel: '',
+          secondsPerDrink: 0,
         },
-        message: 'Order is not linked to a CofePlus machine',
+        environment,
+        message:
+          'This kiosk is not linked to a CofePlus machine. Set the kiosk pod ID in admin.',
       })
     }
 
-    const { order: refreshed, queue } = await refreshOrderQueueState(
-      adminClient,
-      order as MachineOrderRow
-    )
+    const {
+      order: refreshed,
+      queue,
+      activationError,
+    } = await refreshOrderQueueState(adminClient, machineOrder)
 
-    // Re-fetch joined kiosk data after possible status/QR updates
     const { data: fullOrder } = await adminClient
       .from('orders')
-      .select('*, kiosks(*)')
+      .select(ORDER_DETAIL_SELECT)
       .eq('id', refreshed.id)
       .single()
 
     const currentOrder = fullOrder || { ...order, ...refreshed }
-    const environment = resolveCofeplusEnvironment(
+    const currentEnvironment = resolveCofeplusEnvironment(
       currentOrder.cofeplus_environment
     )
 
     let dispatch = null
-    // Live: read real machine state. Test: simulated local status only.
     if (
-      environment === 'live' &&
+      currentEnvironment === 'live' &&
       currentOrder.cofeplus_dispatch_id &&
       currentOrder.cofeplus_pod_id
     ) {
       const snapshot = await fetchDispatchSnapshot(
         currentOrder.cofeplus_pod_id,
         currentOrder.cofeplus_dispatch_id,
-        environment
+        currentEnvironment
       )
       if (snapshot.ok) {
         dispatch = snapshot.snapshot
       }
     } else if (
-      environment === 'test' &&
+      currentEnvironment === 'test' &&
       currentOrder.pickup_code &&
       currentOrder.cofeplus_dispatch_id
     ) {
       dispatch = {
         id: currentOrder.cofeplus_dispatch_id,
-        state: currentOrder.status === 'brewing' ? 'making' : currentOrder.status === 'completed' ? 'done' : currentOrder.status === 'ready' ? 'ready' : 'pending',
+        state:
+          currentOrder.status === 'brewing'
+            ? 'making'
+            : currentOrder.status === 'completed'
+              ? 'done'
+              : currentOrder.status === 'ready'
+                ? 'ready'
+                : 'pending',
         orderNumber: currentOrder.order_number || '',
         pickupCode: currentOrder.pickup_code,
         archived: false,
@@ -125,7 +179,8 @@ export async function GET(
       order: currentOrder,
       dispatch,
       queue,
-      environment,
+      environment: currentEnvironment,
+      message: activationError,
     })
   } catch (error: unknown) {
     return createApiError(getErrorMessage(error), 500)

@@ -52,6 +52,9 @@ export async function getSupportTicketById(id: string) {
     .single()
 
   if (error) {
+    if (error.code === 'PGRST116') {
+      return null
+    }
     throw new Error(error.message)
   }
 
@@ -71,6 +74,7 @@ export async function updateTicketStatus(id: string, status: string) {
   }
 
   revalidatePath('/dashboard/support')
+  revalidatePath(`/dashboard/support/${id}`)
   return { success: true }
 }
 

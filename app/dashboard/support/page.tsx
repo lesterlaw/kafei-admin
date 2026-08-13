@@ -14,7 +14,12 @@ export default async function SupportPage() {
         </p>
       </div>
 
-      <DataTable columns={ticketColumns} data={tickets} searchKey="subject" />
+      <DataTable
+        columns={ticketColumns}
+        data={tickets}
+        searchKey="subject"
+        getRowHref={(ticket) => `/dashboard/support/${ticket.id}`}
+      />
     </div>
   )
 }

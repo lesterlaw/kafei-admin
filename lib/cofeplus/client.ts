@@ -15,6 +15,8 @@ export interface CofeplusRequestOptions {
   authSource?: string
   /** Set false to silence server logs for a call */
   log?: boolean
+  /** Abort the request after this many milliseconds */
+  timeoutMs?: number
 }
 
 export interface CofeplusResponse {
@@ -102,12 +104,25 @@ export async function callCofeplusApi(
   }
 
   try {
-    const response = await fetch(requestUrl, {
-      method,
-      headers,
-      body: options.body ?? undefined,
-      cache: 'no-store',
-    })
+    const controller = new AbortController()
+    const timeoutMs = options.timeoutMs && options.timeoutMs > 0 ? options.timeoutMs : 0
+    const timer =
+      timeoutMs > 0
+        ? setTimeout(() => controller.abort(), timeoutMs)
+        : null
+
+    let response: Response
+    try {
+      response = await fetch(requestUrl, {
+        method,
+        headers,
+        body: options.body ?? undefined,
+        cache: 'no-store',
+        signal: controller.signal,
+      })
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
     const durationMs = Date.now() - startedAt
     const body = await response.text()
 

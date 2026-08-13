@@ -2,20 +2,22 @@ import {
   buildDispatchBody,
   parseCreateDispatch,
   parseDispatchSnapshot,
-  parsePodItems,
-  parseSingleItem,
   type CreateDispatchResult,
   type DispatchSnapshot,
   type PodItemOption,
 } from '@/components/api-test/cofeplus-test-shared'
 import type { CofeplusEnvironment } from '@/lib/cofeplus/config'
 import { executeCofeplusRequest } from '@/lib/cofeplus/proxy'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { loadSyncedPodItem } from '@/lib/cofeplus/sync'
+import type { SupabaseClient } from '@supabase/supabase-js'
 
 export interface CreatePickupDispatchInput {
   podId: string
   itemCode: string
   environment: CofeplusEnvironment
   displayNote?: string
+  adminClient?: SupabaseClient
 }
 
 export interface CreatePickupDispatchResult {
@@ -36,62 +38,21 @@ export interface CreatePickupDispatchError {
 async function loadPodItem(
   podId: string,
   itemCode: string,
-  environment: CofeplusEnvironment
+  environment: CofeplusEnvironment,
+  adminClient?: SupabaseClient
 ): Promise<
   | { ok: true; item: PodItemOption }
   | { ok: false; error: string; status?: number; body?: string }
 > {
-  const itemsResponse = await executeCofeplusRequest({
-    method: 'GET',
-    path: `/partner/v1/pods/${encodeURIComponent(podId)}/items`,
-    environment,
-  })
-
-  if (itemsResponse.ok) {
-    try {
-      const items = parsePodItems(itemsResponse.body)
-      const match = items.find((item) => item.itemCode === itemCode)
-      if (match) {
-        return { ok: true, item: match }
-      }
-    } catch (err) {
-      return {
-        ok: false,
-        error:
-          err instanceof Error
-            ? err.message
-            : 'Failed to parse pod items response',
-        status: itemsResponse.status,
-        body: itemsResponse.body,
-      }
-    }
+  const client = adminClient ?? createAdminClient()
+  const cached = await loadSyncedPodItem(client, podId, itemCode, environment)
+  if (cached) {
+    return { ok: true, item: cached }
   }
 
-  const itemResponse = await executeCofeplusRequest({
-    method: 'GET',
-    path: `/partner/v1/items/${encodeURIComponent(podId)}/${encodeURIComponent(itemCode)}`,
-    environment,
-  })
-
-  if (!itemResponse.ok) {
-    return {
-      ok: false,
-      error: `Item ${itemCode} not found on pod ${podId}`,
-      status: itemResponse.status,
-      body: itemResponse.body,
-    }
-  }
-
-  try {
-    const item = parseSingleItem(itemResponse.body)
-    return { ok: true, item }
-  } catch {
-    return {
-      ok: false,
-      error: `Unable to parse item ${itemCode} for pod ${podId}`,
-      status: itemResponse.status,
-      body: itemResponse.body,
-    }
+  return {
+    ok: false,
+    error: `Item ${itemCode} is not in the synced menu for ${podId}. Run CofePlus sync.`,
   }
 }
 
@@ -148,7 +109,7 @@ export async function createPickupDispatch(
     return createSimulatedPickupDispatch(input)
   }
 
-  const loaded = await loadPodItem(podId, itemCode, environment)
+  const loaded = await loadPodItem(podId, itemCode, environment, input.adminClient)
   if (!loaded.ok) {
     return {
       ok: false,

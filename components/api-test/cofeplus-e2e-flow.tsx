@@ -14,6 +14,7 @@ import {
   Zap,
 } from 'lucide-react'
 import { proxyCofeplusRequest } from '@/app/actions/cofeplus'
+import { getOrSyncCofeplusMenu } from '@/app/actions/cofeplus-sync'
 import type { CofeplusResponse } from '@/lib/cofeplus/client'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -39,14 +40,12 @@ import {
   buildDispatchBody,
   formatJson,
   isDispatchArchivedError,
-  mergeModifiersFromItems,
   modifierExtraTotal,
   modifiersToChoiceMap,
   parseCreateDispatch,
   parseDispatchSnapshot,
   parseDispatchState,
-  parsePodItems,
-  parsePods,
+  podItemFromCacheRow,
   selectModifiersFromGroups,
   type ConnectionState,
   type CreateDispatchResult,
@@ -349,15 +348,14 @@ export function CofeplusE2eFlow({
     setBusy('pods')
     setError(null)
     try {
-      const response = await request('List pods', {
-        method: 'GET',
-        path: '/partner/v1/pods',
+      const result = await getOrSyncCofeplusMenu({
+        environment: connection.environment,
+        podId: podId || undefined,
       })
-      if (!response.ok) {
-        throw new Error(`List pods failed (${response.status})`)
-      }
-
-      const nextPods = parsePods(response.body)
+      const nextPods: PodSummary[] = result.pods.map((pod) => ({
+        podId: pod.pod_id,
+        display: pod.display || pod.pod_id,
+      }))
       setPods(nextPods)
       if (!podId && nextPods[0]) {
         setPodId(nextPods[0].podId)
@@ -406,46 +404,17 @@ export function CofeplusE2eFlow({
       advanceStep?: boolean
     }
   ) => {
-    // Prefer categorized menu (includes modifiers); fall back to flat items
-    let response = await request('Load pod menu', {
-      method: 'GET',
-      path: `/partner/v1/pods/${encodeURIComponent(activePodId)}/menu`,
-      query: { lang: FLOW_LANG },
+    const result = await getOrSyncCofeplusMenu({
+      environment: connection.environment,
+      podId: activePodId,
     })
-
-    if (!response.ok) {
-      response = await request('List pod items (fallback)', {
-        method: 'GET',
-        path: `/partner/v1/pods/${encodeURIComponent(activePodId)}/items`,
-        query: { lang: FLOW_LANG },
-      })
-      if (!response.ok) {
-        throw new Error(`Load menu/items failed (${response.status})`)
-      }
-    }
-
-    let nextItems = parsePodItems(response.body)
-
-    const needsModifiers = nextItems.some(
-      (item) => item.modifierGroups.length === 0
-    )
-    if (needsModifiers) {
-      const itemsResponse = await request('Enrich modifiers from items', {
-        method: 'GET',
-        path: `/partner/v1/pods/${encodeURIComponent(activePodId)}/items`,
-        query: { lang: FLOW_LANG },
-      })
-      if (itemsResponse.ok) {
-        nextItems = mergeModifiersFromItems(
-          nextItems,
-          parsePodItems(itemsResponse.body)
-        )
-      }
-    }
+    const nextItems = result.items
+      .map((row) => podItemFromCacheRow(row))
+      .filter((item): item is PodItemOption => item !== null)
 
     setItems(nextItems)
     if (nextItems.length === 0) {
-      throw new Error('No sellable items on this pod')
+      throw new Error('No sellable items in the synced menu for this pod')
     }
 
     const preferredCode = options?.preferItemCode?.trim()

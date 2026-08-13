@@ -8,6 +8,7 @@ import {
   getQueueSnapshot,
   syncBusyOrderAndAdvanceQueue,
   tryActivateNextQueuedOrder,
+  syntheticPodIdForKiosk,
   type MachineOrderRow,
 } from '@/lib/cofeplus/queue'
 
@@ -166,7 +167,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const podId =
+    const kioskPod =
       typeof kiosk.pod_id === 'string' ? kiosk.pod_id.trim() : ''
     const itemCode =
       typeof product.cofeplus_item_code === 'string'
@@ -179,8 +180,12 @@ export async function POST(request: NextRequest) {
     let orderStatus: 'queued' | 'pending' = 'pending'
     let queueMeta: Awaited<ReturnType<typeof getQueueSnapshot>> | null = null
 
+    const podId =
+      kioskPod ||
+      (environment === 'test' ? syntheticPodIdForKiosk(kiosk.id) : '')
+
     if (podId) {
-      if (!itemCode) {
+      if (!itemCode && environment === 'live') {
         return createApiError(
           'This kiosk is linked to a machine, but the product has no CofePlus item code. Set cofeplus_item_code on the product in admin.',
           400
@@ -252,6 +257,8 @@ export async function POST(request: NextRequest) {
 
     if (itemError) {
       console.error('Order item creation error:', itemError)
+      await adminClient.from('orders').delete().eq('id', order.id)
+      return createApiError('Failed to save order items', 500)
     }
 
     let finalOrder = order
@@ -262,7 +269,7 @@ export async function POST(request: NextRequest) {
 
       const { data: refreshed } = await adminClient
         .from('orders')
-        .select('*, kiosks(*)')
+        .select('*, kiosks(*), order_items(*, products(*))')
         .eq('id', order.id)
         .single()
 

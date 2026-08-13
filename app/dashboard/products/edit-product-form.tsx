@@ -67,6 +67,31 @@ export function EditProductForm({ product }: { product: Product }) {
         />
       </div>
       <div className="space-y-2">
+        <Label htmlFor="image">Product Image</Label>
+        {product.image_url ? (
+          <img
+            src={product.image_url}
+            alt={product.name}
+            className="h-20 w-20 rounded object-cover"
+          />
+        ) : null}
+        <Input
+          id="image"
+          name="image"
+          type="file"
+          accept="image/*"
+          disabled={isLoading}
+        />
+        <Input
+          id="image_url"
+          name="image_url"
+          type="url"
+          placeholder="Or paste an image URL"
+          defaultValue={product.image_url || ''}
+          disabled={isLoading}
+        />
+      </div>
+      <div className="space-y-2">
         <Label htmlFor="price">Price</Label>
         <Input
           id="price"

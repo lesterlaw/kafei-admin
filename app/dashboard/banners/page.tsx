@@ -1,6 +1,4 @@
 import { getBanners } from '@/app/actions/data'
-import { DataTable } from '@/components/tables/data-table'
-import { createBannerColumns } from './columns'
 import { Button } from '@/components/ui/button'
 import { Plus } from 'lucide-react'
 import {
@@ -12,10 +10,16 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import { CreateBannerForm } from './create-banner-form'
+import { BannersTable } from './banners-table'
+import { Banner } from '@/types/database'
 
 export default async function BannersPage() {
-  const banners = await getBanners()
-  const columns = createBannerColumns(banners)
+  let banners: Banner[] = []
+  try {
+    banners = (await getBanners()) as Banner[]
+  } catch (error) {
+    console.error('Banners page failed to load rows:', error)
+  }
 
   return (
     <div className="space-y-6">
@@ -46,7 +50,7 @@ export default async function BannersPage() {
         </Dialog>
       </div>
 
-      <DataTable columns={columns} data={banners} searchKey="title" />
+      <BannersTable banners={banners} />
     </div>
   )
 }

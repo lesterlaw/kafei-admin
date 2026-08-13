@@ -118,3 +118,64 @@ export async function getSyncedCofeplusMenuItems(input: {
 
   return data || []
 }
+
+export async function getOrSyncCofeplusMenu(input: {
+  environment: CofeplusEnvironment
+  podId?: string
+}) {
+  await verifyAdmin()
+  const adminClient = createAdminClient()
+  const environment = input.environment === 'live' ? 'live' : 'test'
+  const podId = input.podId?.trim() || ''
+
+  const load = async () => {
+    const [pods, items] = await Promise.all([
+      adminClient
+        .from('cofeplus_pods')
+        .select('pod_id, display, synced_at')
+        .eq('environment', environment)
+        .order('pod_id', { ascending: true }),
+      adminClient
+        .from('cofeplus_menu_items')
+        .select(
+          'item_code, display, category, price, out_of_stock, modifiers, raw, pod_id'
+        )
+        .eq('environment', environment)
+        .order('display', { ascending: true }),
+    ])
+
+    if (pods.error) throw new Error(pods.error.message)
+    if (items.error) throw new Error(items.error.message)
+
+    const allItems = items.data || []
+    return {
+      pods: pods.data || [],
+      items: podId ? allItems.filter((item) => item.pod_id === podId) : allItems,
+    }
+  }
+
+  let cached = await load()
+  let ranSync = false
+
+  if (cached.pods.length === 0 || (podId && cached.items.length === 0)) {
+    const result = await syncCofeplusCatalog(adminClient, {
+      environment,
+      podId: podId || undefined,
+      upsertKafeiRecords: true,
+    })
+    if (!result.ok) {
+      throw new Error(result.error || 'Sync failed')
+    }
+    ranSync = true
+    cached = await load()
+    revalidatePath('/dashboard/kiosks')
+    revalidatePath('/dashboard/products')
+    revalidatePath('/dashboard/api-test')
+  }
+
+  return {
+    ...cached,
+    ranSync,
+    environment,
+  }
+}

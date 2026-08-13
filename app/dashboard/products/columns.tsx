@@ -4,7 +4,6 @@ import { ColumnDef } from '@tanstack/react-table'
 import { Product } from '@/types/database'
 import { Badge } from '@/components/ui/badge'
 import { Eye, EyeOff, Pencil, Trash2 } from 'lucide-react'
-import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { deleteProduct } from '@/app/actions/products'
 import {
@@ -42,7 +41,7 @@ const ProductActions = ({ product }: { product: Product }) => {
             <Pencil className="h-4 w-4" />
           </Button>
         </DialogTrigger>
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit Product</DialogTitle>
             <DialogDescription>
@@ -78,18 +77,25 @@ const ProductActions = ({ product }: { product: Product }) => {
 
 export const productColumns: ColumnDef<Product>[] = [
   {
-    accessorKey: 'name',
-    header: 'Name',
+    accessorKey: 'image_url',
+    header: 'Image',
     cell: ({ row }) => {
+      const url = row.original.image_url
+      if (!url) {
+        return <span className="text-muted-foreground">—</span>
+      }
       return (
-        <Link
-          href={`/dashboard/products/${row.original.id}`}
-          className="text-primary hover:underline"
-        >
-          {row.getValue('name')}
-        </Link>
+        <img
+          src={url}
+          alt={row.original.name}
+          className="h-10 w-10 rounded object-cover"
+        />
       )
     },
+  },
+  {
+    accessorKey: 'name',
+    header: 'Name',
   },
   {
     accessorKey: 'price',

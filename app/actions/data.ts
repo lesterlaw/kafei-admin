@@ -118,58 +118,67 @@ export async function getCoupons() {
 
 export async function getBanners() {
   await verifyAdmin()
-  const supabase = createAdminClient()
-  const { data, error } = await supabase
-    .from('banners')
-    .select('*')
-    .order('sort_order', { ascending: true })
-    .order('created_at', { ascending: false })
+  try {
+    const supabase = createAdminClient()
+    const { data, error } = await supabase
+      .from('banners')
+      .select('*')
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: false })
 
-  if (error) {
-    // Missing migration / table should not crash the dashboard route
-    if (error.code === '42P01' || /does not exist/i.test(error.message)) {
+    if (error) {
       console.error('getBanners:', error.message)
       return []
     }
-    throw new Error(error.message)
-  }
 
-  return data || []
+    return data || []
+  } catch (error) {
+    console.error('getBanners:', error)
+    return []
+  }
 }
 
 export async function getPromoCodes() {
   await verifyAdmin()
-  const supabase = createAdminClient()
-  const { data, error } = await supabase
-    .from('promo_codes')
-    .select('*')
-    .order('is_system', { ascending: false })
-    .order('created_at', { ascending: false })
+  try {
+    const supabase = createAdminClient()
+    const { data, error } = await supabase
+      .from('promo_codes')
+      .select('*')
+      .order('is_system', { ascending: false })
+      .order('created_at', { ascending: false })
 
-  if (error) {
-    if (error.code === '42P01' || /does not exist/i.test(error.message)) {
+    if (error) {
       console.error('getPromoCodes:', error.message)
       return []
     }
-    throw new Error(error.message)
-  }
 
-  return data || []
+    return data || []
+  } catch (error) {
+    console.error('getPromoCodes:', error)
+    return []
+  }
 }
 
 export async function getSupportTickets() {
   await verifyAdmin()
-  const supabase = createAdminClient()
-  const { data, error } = await supabase
-    .from('support_tickets')
-    .select('*, users(email, full_name)')
-    .order('created_at', { ascending: false })
+  try {
+    const supabase = createAdminClient()
+    const { data, error } = await supabase
+      .from('support_tickets')
+      .select('*, users(email, full_name)')
+      .order('created_at', { ascending: false })
 
-  if (error) {
-    throw new Error(error.message)
+    if (error) {
+      console.error('getSupportTickets:', error.message)
+      return []
+    }
+
+    return data || []
+  } catch (error) {
+    console.error('getSupportTickets:', error)
+    return []
   }
-
-  return data || []
 }
 
 export async function getReferrals() {

@@ -59,18 +59,24 @@ function parseUserIds(raw: string | null): string[] {
 
 export async function getPromoCodes() {
   await verifyAdmin()
-  const supabase = createAdminClient()
-  const { data, error } = await supabase
-    .from('promo_codes')
-    .select('*')
-    .order('is_system', { ascending: false })
-    .order('created_at', { ascending: false })
+  try {
+    const supabase = createAdminClient()
+    const { data, error } = await supabase
+      .from('promo_codes')
+      .select('*')
+      .order('is_system', { ascending: false })
+      .order('created_at', { ascending: false })
 
-  if (error) {
-    throw new Error(error.message)
+    if (error) {
+      console.error('getPromoCodes:', error.message)
+      return []
+    }
+
+    return data || []
+  } catch (error) {
+    console.error('getPromoCodes:', error)
+    return []
   }
-
-  return data || []
 }
 
 export async function createPromoCode(formData: FormData) {
