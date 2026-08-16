@@ -14,6 +14,8 @@ import {
 } from '@/components/ui/dialog'
 import { CreateUserForm } from './create-user-form'
 
+export const dynamic = 'force-dynamic'
+
 export default async function UsersPage() {
   let users: Awaited<ReturnType<typeof getUsers>> = []
   try {

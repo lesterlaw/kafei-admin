@@ -3,6 +3,8 @@ import { DataTable } from '@/components/tables/data-table'
 import { orderColumns } from './columns'
 import { ExportOrdersButton } from './export-button'
 
+export const dynamic = 'force-dynamic'
+
 export default async function OrdersPage() {
   let orders: Awaited<ReturnType<typeof getOrders>> = []
   try {

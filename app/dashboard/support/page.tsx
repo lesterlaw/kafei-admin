@@ -2,6 +2,8 @@ import { getSupportTickets } from '@/app/actions/data'
 import { DataTable } from '@/components/tables/data-table'
 import { ticketColumns } from './columns'
 
+export const dynamic = 'force-dynamic'
+
 export default async function SupportPage() {
   let tickets: Awaited<ReturnType<typeof getSupportTickets>> = []
   try {
