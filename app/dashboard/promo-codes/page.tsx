@@ -54,8 +54,8 @@ export default async function PromoCodesPage() {
         <div>
           <h1 className="text-3xl font-bold">Promo Codes</h1>
           <p className="text-muted-foreground">
-            Manage marketing and system promo codes (separate from daily
-            coupons).
+            Marketing discount codes customers enter at checkout (for example
+            NEW10). Daily Coupons are separate subscription entitlements.
           </p>
         </div>
         <Dialog>

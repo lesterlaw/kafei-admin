@@ -29,36 +29,77 @@ async function verifyAdmin() {
 
 export async function getSupportTickets() {
   await verifyAdmin()
-  const supabase = createAdminClient()
-  const { data, error } = await supabase
-    .from('support_tickets')
-    .select('*, users(email, full_name)')
-    .order('created_at', { ascending: false })
+  try {
+    const supabase = createAdminClient()
+    const embedded = await supabase
+      .from('support_tickets')
+      .select('*, users(email, full_name, phone)')
+      .order('created_at', { ascending: false })
 
-  if (error) {
-    throw new Error(error.message)
+    if (!embedded.error) {
+      return embedded.data || []
+    }
+
+    console.error(
+      'getSupportTickets embed failed, falling back:',
+      embedded.error.message
+    )
+    const fallback = await supabase
+      .from('support_tickets')
+      .select('*')
+      .order('created_at', { ascending: false })
+
+    if (fallback.error) {
+      console.error('getSupportTickets:', fallback.error.message)
+      return []
+    }
+
+    return fallback.data || []
+  } catch (error) {
+    console.error('getSupportTickets:', error)
+    return []
   }
-
-  return data || []
 }
 
 export async function getSupportTicketById(id: string) {
   await verifyAdmin()
-  const supabase = createAdminClient()
-  const { data, error } = await supabase
-    .from('support_tickets')
-    .select('*, users(*)')
-    .eq('id', id)
-    .single()
+  try {
+    const supabase = createAdminClient()
+    const embedded = await supabase
+      .from('support_tickets')
+      .select('*, users(*)')
+      .eq('id', id)
+      .maybeSingle()
 
-  if (error) {
-    if (error.code === 'PGRST116') {
+    if (!embedded.error && embedded.data) {
+      return embedded.data
+    }
+
+    const fallback = await supabase
+      .from('support_tickets')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle()
+
+    if (fallback.error || !fallback.data) {
       return null
     }
-    throw new Error(error.message)
-  }
 
-  return data
+    let user = null
+    if (fallback.data.user_id) {
+      const { data } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', fallback.data.user_id)
+        .maybeSingle()
+      user = data
+    }
+
+    return { ...fallback.data, users: user }
+  } catch (error) {
+    console.error('getSupportTicketById:', error)
+    return null
+  }
 }
 
 export async function updateTicketStatus(id: string, status: string) {

@@ -104,7 +104,7 @@ const navItems = [
         icon: Gift,
       },
       {
-        title: 'Coupons',
+        title: 'Daily Coupons',
         url: '/dashboard/coupons',
         icon: Ticket,
       },

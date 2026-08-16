@@ -15,7 +15,12 @@ import {
 import { CreateUserForm } from './create-user-form'
 
 export default async function UsersPage() {
-  const users = await getUsers()
+  let users: Awaited<ReturnType<typeof getUsers>> = []
+  try {
+    users = await getUsers()
+  } catch (error) {
+    console.error('Users page failed to load rows:', error)
+  }
 
   return (
     <div className="space-y-6">
@@ -57,4 +62,3 @@ export default async function UsersPage() {
     </div>
   )
 }
-

@@ -13,7 +13,12 @@ export default async function SupportTicketDetailPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
-  const ticket = await getSupportTicketById(id)
+  let ticket: Awaited<ReturnType<typeof getSupportTicketById>> = null
+  try {
+    ticket = await getSupportTicketById(id)
+  } catch (error) {
+    console.error('Support ticket detail failed to load:', error)
+  }
 
   if (!ticket) {
     notFound()
@@ -43,7 +48,7 @@ export default async function SupportTicketDetailPage({
             <div>
               <p className="text-sm text-muted-foreground">Status</p>
               <Badge className="mt-1 capitalize">
-                {String(ticket.status).replace('_', ' ')}
+                {String(ticket.status || '').replace('_', ' ') || '—'}
               </Badge>
             </div>
             <div>

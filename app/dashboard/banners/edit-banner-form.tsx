@@ -61,16 +61,31 @@ export function EditBannerForm({ banner }: { banner: Banner }) {
         </div>
       )}
       <div className="space-y-2">
-        <Label htmlFor="image_url">Image URL</Label>
+        <Label htmlFor="image">Banner Image</Label>
+        {banner.image_url ? (
+          <img
+            src={banner.image_url}
+            alt={banner.title || 'Banner'}
+            className="h-24 w-full max-w-sm rounded object-cover"
+          />
+        ) : null}
+        <Input
+          id="image"
+          name="image"
+          type="file"
+          accept="image/*"
+          disabled={isLoading}
+        />
         <Input
           id="image_url"
           name="image_url"
           type="url"
+          placeholder="Or paste an image URL"
           defaultValue={banner.image_url}
-          required
           disabled={isLoading}
         />
         <p className="text-xs text-muted-foreground">
+          Upload a new file to replace the current image, or keep the URL.
           Recommended size: 1200×600 px (2:1)
         </p>
       </div>

@@ -4,7 +4,12 @@ import { orderColumns } from './columns'
 import { ExportOrdersButton } from './export-button'
 
 export default async function OrdersPage() {
-  const orders = await getOrders()
+  let orders: Awaited<ReturnType<typeof getOrders>> = []
+  try {
+    orders = await getOrders()
+  } catch (error) {
+    console.error('Orders page failed to load rows:', error)
+  }
 
   return (
     <div className="space-y-6">
@@ -25,4 +30,3 @@ export default async function OrdersPage() {
     </div>
   )
 }
-

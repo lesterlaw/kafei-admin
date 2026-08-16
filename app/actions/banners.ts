@@ -49,19 +49,64 @@ export async function getBanners() {
   }
 }
 
+async function resolveBannerImageUrl(
+  supabase: ReturnType<typeof createAdminClient>,
+  formData: FormData,
+  existingUrl?: string | null
+) {
+  const file = formData.get('image')
+  const urlField = ((formData.get('image_url') as string) || '').trim()
+
+  if (file instanceof File && file.size > 0) {
+    await supabase.storage.createBucket('product-images', { public: true }).then(
+      () => undefined,
+      () => undefined
+    )
+
+    const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg'
+    const path = `banners/${crypto.randomUUID()}.${ext}`
+    const buffer = Buffer.from(await file.arrayBuffer())
+    const { error } = await supabase.storage.from('product-images').upload(path, buffer, {
+      contentType: file.type || 'image/jpeg',
+      upsert: false,
+    })
+
+    if (error) {
+      throw new Error(
+        `Image upload failed: ${error.message}. You can also paste an image URL instead.`
+      )
+    }
+
+    const { data } = supabase.storage.from('product-images').getPublicUrl(path)
+    return data.publicUrl
+  }
+
+  if (urlField) {
+    return urlField
+  }
+
+  return existingUrl || null
+}
+
 export async function createBanner(formData: FormData) {
   await verifyAdmin()
   const supabase = createAdminClient()
 
-  const imageUrl = (formData.get('image_url') as string)?.trim()
   const title = ((formData.get('title') as string) || '').trim() || null
   const linkUrl = ((formData.get('link_url') as string) || '').trim() || null
   const sortOrderRaw = formData.get('sort_order') as string
   const sortOrder = sortOrderRaw ? parseInt(sortOrderRaw, 10) : 0
   const isActive = formData.get('is_active') === 'true'
 
+  let imageUrl: string | null = null
+  try {
+    imageUrl = await resolveBannerImageUrl(supabase, formData)
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Image upload failed' }
+  }
+
   if (!imageUrl) {
-    return { error: 'Image URL is required' }
+    return { error: 'Upload an image or paste an image URL' }
   }
 
   const { error } = await supabase.from('banners').insert({
@@ -84,15 +129,31 @@ export async function updateBanner(id: string, formData: FormData) {
   await verifyAdmin()
   const supabase = createAdminClient()
 
-  const imageUrl = (formData.get('image_url') as string)?.trim()
   const title = ((formData.get('title') as string) || '').trim() || null
   const linkUrl = ((formData.get('link_url') as string) || '').trim() || null
   const sortOrderRaw = formData.get('sort_order') as string
   const sortOrder = sortOrderRaw ? parseInt(sortOrderRaw, 10) : 0
   const isActive = formData.get('is_active') === 'true'
 
+  const { data: existing } = await supabase
+    .from('banners')
+    .select('image_url')
+    .eq('id', id)
+    .maybeSingle()
+
+  let imageUrl: string | null = null
+  try {
+    imageUrl = await resolveBannerImageUrl(
+      supabase,
+      formData,
+      existing?.image_url || null
+    )
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Image upload failed' }
+  }
+
   if (!imageUrl) {
-    return { error: 'Image URL is required' }
+    return { error: 'Upload an image or paste an image URL' }
   }
 
   const { error } = await supabase

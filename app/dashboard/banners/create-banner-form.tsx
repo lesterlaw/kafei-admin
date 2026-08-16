@@ -41,17 +41,23 @@ export function CreateBannerForm() {
         </div>
       )}
       <div className="space-y-2">
-        <Label htmlFor="image_url">Image URL</Label>
+        <Label htmlFor="image">Banner Image</Label>
+        <Input
+          id="image"
+          name="image"
+          type="file"
+          accept="image/*"
+          disabled={isLoading}
+        />
         <Input
           id="image_url"
           name="image_url"
           type="url"
-          placeholder="https://..."
-          required
+          placeholder="Or paste an image URL"
           disabled={isLoading}
         />
         <p className="text-xs text-muted-foreground">
-          Recommended size: 1200×600 px (2:1)
+          Upload a file or paste a URL. Recommended size: 1200×600 px (2:1)
         </p>
       </div>
       <div className="space-y-2">

@@ -29,36 +29,45 @@ async function verifyAdmin() {
 
 export async function getUsers() {
   await verifyAdmin()
-  const supabase = createAdminClient()
-  const { data, error } = await supabase
-    .from('users')
-    .select('*')
-    .order('created_at', { ascending: false })
+  try {
+    const supabase = createAdminClient()
+    const { data, error } = await supabase
+      .from('users')
+      .select('*')
+      .order('created_at', { ascending: false })
 
-  if (error) {
-    throw new Error(error.message)
+    if (error) {
+      console.error('getUsers:', error.message)
+      return []
+    }
+
+    return data || []
+  } catch (error) {
+    console.error('getUsers:', error)
+    return []
   }
-
-  return data || []
 }
 
 export async function getUserById(id: string) {
   await verifyAdmin()
-  const supabase = createAdminClient()
-  const { data, error } = await supabase
-    .from('users')
-    .select('*')
-    .eq('id', id)
-    .single()
+  try {
+    const supabase = createAdminClient()
+    const { data, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle()
 
-  if (error) {
-    if (error.code === 'PGRST116') {
+    if (error) {
+      console.error('getUserById:', error.message)
       return null
     }
-    throw new Error(error.message)
-  }
 
-  return data
+    return data
+  } catch (error) {
+    console.error('getUserById:', error)
+    return null
+  }
 }
 
 export async function createUser(formData: FormData) {

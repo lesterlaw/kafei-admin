@@ -58,17 +58,33 @@ export async function getAddOns() {
 
 export async function getOrders() {
   await verifyAdmin()
-  const supabase = createAdminClient()
-  const { data, error } = await supabase
-    .from('orders')
-    .select('*, users(email, full_name), kiosks(name, location)')
-    .order('created_at', { ascending: false })
+  try {
+    const supabase = createAdminClient()
+    const embedded = await supabase
+      .from('orders')
+      .select('*, users(email, full_name, phone), kiosks(name, location, address)')
+      .order('created_at', { ascending: false })
 
-  if (error) {
-    throw new Error(error.message)
+    if (!embedded.error) {
+      return embedded.data || []
+    }
+
+    console.error('getOrders embed failed, falling back:', embedded.error.message)
+    const fallback = await supabase
+      .from('orders')
+      .select('*')
+      .order('created_at', { ascending: false })
+
+    if (fallback.error) {
+      console.error('getOrders:', fallback.error.message)
+      return []
+    }
+
+    return fallback.data || []
+  } catch (error) {
+    console.error('getOrders:', error)
+    return []
   }
-
-  return data || []
 }
 
 export async function getKiosks() {
@@ -164,17 +180,30 @@ export async function getSupportTickets() {
   await verifyAdmin()
   try {
     const supabase = createAdminClient()
-    const { data, error } = await supabase
+    const embedded = await supabase
       .from('support_tickets')
-      .select('*, users(email, full_name)')
+      .select('*, users(email, full_name, phone)')
       .order('created_at', { ascending: false })
 
-    if (error) {
-      console.error('getSupportTickets:', error.message)
+    if (!embedded.error) {
+      return embedded.data || []
+    }
+
+    console.error(
+      'getSupportTickets embed failed, falling back:',
+      embedded.error.message
+    )
+    const fallback = await supabase
+      .from('support_tickets')
+      .select('*')
+      .order('created_at', { ascending: false })
+
+    if (fallback.error) {
+      console.error('getSupportTickets:', fallback.error.message)
       return []
     }
 
-    return data || []
+    return fallback.data || []
   } catch (error) {
     console.error('getSupportTickets:', error)
     return []

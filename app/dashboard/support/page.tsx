@@ -3,7 +3,12 @@ import { DataTable } from '@/components/tables/data-table'
 import { ticketColumns } from './columns'
 
 export default async function SupportPage() {
-  const tickets = await getSupportTickets()
+  let tickets: Awaited<ReturnType<typeof getSupportTickets>> = []
+  try {
+    tickets = await getSupportTickets()
+  } catch (error) {
+    console.error('Support page failed to load rows:', error)
+  }
 
   return (
     <div className="space-y-6">
@@ -23,4 +28,3 @@ export default async function SupportPage() {
     </div>
   )
 }
-

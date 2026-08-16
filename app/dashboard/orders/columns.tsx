@@ -91,18 +91,24 @@ export const orderColumns: ColumnDef<any>[] = [
     },
   },
   {
-    accessorKey: 'users.email',
+    id: 'user',
     header: 'User',
+    accessorFn: (row) =>
+      row.users?.email || row.users?.full_name || row.users?.phone || '—',
   },
   {
-    accessorKey: 'kiosks.name',
+    id: 'kiosk',
     header: 'Kiosk',
+    accessorFn: (row) => row.kiosks?.name || row.kiosks?.location || '—',
   },
   {
     accessorKey: 'status',
     header: 'Status',
     cell: ({ row }) => {
-      const status = row.getValue('status') as string
+      const status = String(row.getValue('status') || '')
+      if (!status) {
+        return <span className="text-muted-foreground">—</span>
+      }
       return (
         <Badge
           variant={
@@ -113,7 +119,7 @@ export const orderColumns: ColumnDef<any>[] = [
                 : 'secondary'
           }
         >
-          {status}
+          {status.replace('_', ' ')}
         </Badge>
       )
     },

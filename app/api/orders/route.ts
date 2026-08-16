@@ -128,32 +128,6 @@ export async function POST(request: NextRequest) {
       return createApiError('Kiosk not found', 404)
     }
 
-    let validatedCouponId: string | null = null
-
-    if (coupon_id) {
-      const { data: coupon, error: couponError } = await adminClient
-        .from('coupons')
-        .select('id, expires_at, is_redeemed')
-        .eq('id', coupon_id)
-        .eq('user_id', user.id)
-        .single()
-
-      if (couponError || !coupon) {
-        console.error('Coupon not found for user:', coupon_id, couponError)
-        return createApiError('Coupon not found', 404)
-      }
-
-      if (coupon.is_redeemed) {
-        return createApiError('Coupon has already been redeemed', 400)
-      }
-
-      if (new Date(coupon.expires_at) < new Date()) {
-        return createApiError('Coupon has expired', 400)
-      }
-
-      validatedCouponId = coupon.id
-    }
-
     let total = Number(product.price)
 
     if (addons && addons.length > 0) {
@@ -164,6 +138,81 @@ export async function POST(request: NextRequest) {
 
       if (addonData) {
         total += addonData.reduce((sum, addon) => sum + Number(addon.price), 0)
+      }
+    }
+
+    let validatedCouponId: string | null = null
+
+    if (coupon_id) {
+      const { data: coupon } = await adminClient
+        .from('coupons')
+        .select('id, expires_at, is_redeemed')
+        .eq('id', coupon_id)
+        .eq('user_id', user.id)
+        .maybeSingle()
+
+      if (coupon) {
+        if (coupon.is_redeemed) {
+          return createApiError('Coupon has already been redeemed', 400)
+        }
+
+        if (new Date(coupon.expires_at) < new Date()) {
+          return createApiError('Coupon has expired', 400)
+        }
+
+        validatedCouponId = coupon.id
+      } else {
+        const { data: promo } = await adminClient
+          .from('promo_codes')
+          .select('*')
+          .eq('id', coupon_id)
+          .maybeSingle()
+
+        if (!promo || promo.is_active === false) {
+          console.error('Coupon/promo not found for user:', coupon_id)
+          return createApiError('Coupon not found', 404)
+        }
+
+        const now = Date.now()
+        if (promo.starts_at && new Date(promo.starts_at).getTime() > now) {
+          return createApiError('Promo code is not active yet', 400)
+        }
+        if (promo.ends_at && new Date(promo.ends_at).getTime() < now) {
+          return createApiError('Promo code has expired', 400)
+        }
+
+        if (!promo.applies_to_all_users && !promo.is_system) {
+          const { data: assignment } = await adminClient
+            .from('promo_code_users')
+            .select('promo_code_id')
+            .eq('promo_code_id', promo.id)
+            .eq('user_id', user.id)
+            .maybeSingle()
+
+          if (!assignment) {
+            return createApiError('Coupon not found', 404)
+          }
+        }
+
+        if (promo.min_amount && total < Number(promo.min_amount)) {
+          return createApiError('Order does not meet the promo minimum', 400)
+        }
+
+        let discount = 0
+        if (promo.type === 'fixed') {
+          discount = Number(promo.discount_value) || 0
+        } else if (promo.type === 'percent') {
+          discount =
+            Math.round(total * (Number(promo.discount_value) / 100) * 100) / 100
+          if (promo.max_discount_amount != null) {
+            discount = Math.min(discount, Number(promo.max_discount_amount))
+          }
+        } else if (promo.type === 'referral') {
+          discount = total * (Number(promo.discount_value) || 1)
+        }
+
+        total = Math.max(0, Math.round((total - discount) * 100) / 100)
+        validatedCouponId = promo.id
       }
     }
 

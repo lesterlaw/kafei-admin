@@ -91,8 +91,10 @@ export const ticketColumns: ColumnDef<any>[] = [
     },
   },
   {
-    accessorKey: 'users.email',
+    id: 'user',
     header: 'User',
+    accessorFn: (row) =>
+      row.users?.email || row.users?.full_name || row.users?.phone || '—',
   },
   {
     accessorKey: 'message',
@@ -113,7 +115,10 @@ export const ticketColumns: ColumnDef<any>[] = [
     accessorKey: 'status',
     header: 'Status',
     cell: ({ row }) => {
-      const status = row.getValue('status') as string
+      const status = String(row.getValue('status') || '')
+      if (!status) {
+        return <span className="text-muted-foreground">—</span>
+      }
       const variants: Record<string, 'default' | 'secondary' | 'destructive'> = {
         open: 'default',
         in_progress: 'secondary',

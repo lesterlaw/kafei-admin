@@ -9,7 +9,12 @@ export default async function UserDetailPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
-  const user = await getUserById(id)
+  let user: Awaited<ReturnType<typeof getUserById>> = null
+  try {
+    user = await getUserById(id)
+  } catch (error) {
+    console.error('User detail failed to load:', error)
+  }
 
   if (!user) {
     notFound()

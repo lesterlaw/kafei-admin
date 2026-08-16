@@ -45,13 +45,19 @@ export default async function OrderDetailPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
-  const order = await getOrderById(id)
+  let order: Awaited<ReturnType<typeof getOrderById>> = null
+  try {
+    order = await getOrderById(id)
+  } catch (error) {
+    console.error('Order detail failed to load:', error)
+  }
 
   if (!order) {
     notFound()
   }
 
   let couponCode: string | null = null
+  let paymentLabel = 'Standard checkout'
   if (order.coupon_id) {
     const supabase = createAdminClient()
     const { data: coupon } = await supabase
@@ -59,7 +65,20 @@ export default async function OrderDetailPage({
       .select('code')
       .eq('id', order.coupon_id)
       .maybeSingle()
-    couponCode = coupon?.code || null
+    if (coupon?.code) {
+      couponCode = coupon.code
+      paymentLabel = `Daily coupon (${coupon.code})`
+    } else {
+      const { data: promo } = await supabase
+        .from('promo_codes')
+        .select('name, code')
+        .eq('id', order.coupon_id)
+        .maybeSingle()
+      if (promo) {
+        couponCode = promo.code || promo.name
+        paymentLabel = `Promo code (${couponCode})`
+      }
+    }
   }
 
   const items = order.order_items || []
@@ -110,11 +129,7 @@ export default async function OrderDetailPage({
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Payment</p>
-              <p className="font-medium">
-                {couponCode
-                  ? `Daily coupon (${couponCode})`
-                  : 'Standard checkout'}
-              </p>
+              <p className="font-medium">{paymentLabel}</p>
             </div>
             {order.pickup_code ? (
               <div>
