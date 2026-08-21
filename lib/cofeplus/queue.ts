@@ -466,11 +466,11 @@ export async function tryActivateNextQueuedOrder(
   adminClient: SupabaseClient,
   podId: string,
   environment: CofeplusEnvironment
-): Promise<MachineOrderRow | null> {
+): Promise<{ order: MachineOrderRow | null; error?: string }> {
   const busy = await findBusyMachineOrders(adminClient, podId, environment)
   const freePort = findFreeDeliveryPort(busy)
   if (!freePort) {
-    return null
+    return { order: null }
   }
 
   const podHealth = await fetchPodAvailability(podId, environment)
@@ -478,7 +478,7 @@ export async function tryActivateNextQueuedOrder(
     console.log(
       `[queue] skip activate pod=${podId}: machine not free (${podHealth.status})`
     )
-    return null
+    return { order: null, error: `Machine not available (${podHealth.status})` }
   }
 
   const { data: nextQueued, error } = await adminClient
@@ -493,7 +493,7 @@ export async function tryActivateNextQueuedOrder(
 
   if (error || !nextQueued) {
     if (error) console.error('[queue] tryActivateNextQueuedOrder select failed', error)
-    return null
+    return { order: null }
   }
 
   const item = await loadOrderItemForDispatch(
@@ -505,7 +505,11 @@ export async function tryActivateNextQueuedOrder(
     console.error(
       `[queue] cannot activate order ${nextQueued.id}: missing product item code`
     )
-    return null
+    return {
+      order: null,
+      error:
+        'This drink is missing a CofePlus item code. Set it on the product in admin.',
+    }
   }
 
   // Claim the slot before calling CofePlus to reduce double-activate races
@@ -522,7 +526,7 @@ export async function tryActivateNextQueuedOrder(
 
   if (claimError || !claimed) {
     console.error('[queue] claim race lost or failed', claimError)
-    return null
+    return { order: null }
   }
 
   const persisted = await persistPickupForOrder(
@@ -540,10 +544,10 @@ export async function tryActivateNextQueuedOrder(
       .eq('id', claimed.id)
       .eq('status', 'pending')
       .is('pickup_code', null)
-    return null
+    return { order: null, error: persisted.error }
   }
 
-  return persisted.order
+  return { order: persisted.order }
 }
 
 /**
@@ -715,7 +719,10 @@ export async function refreshOrderQueueState(
     for (const busy of busyOrders) {
       await syncBusyOrderAndAdvanceQueue(adminClient, busy)
     }
-    await tryActivateNextQueuedOrder(adminClient, podId, environment)
+    const activated = await tryActivateNextQueuedOrder(adminClient, podId, environment)
+    if (activated.error && current.status === 'queued') {
+      activationError = activated.error
+    }
 
     const { data: refreshed } = await adminClient
       .from('orders')
@@ -725,6 +732,9 @@ export async function refreshOrderQueueState(
 
     if (refreshed) {
       current = refreshed as MachineOrderRow
+    }
+    if (current.pickup_code) {
+      activationError = undefined
     }
   } else if (needsPickup) {
     const recovered = await recoverStuckPendingOrder(

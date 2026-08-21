@@ -166,10 +166,18 @@ export async function createPickupDispatch(
       )
       return createSimulatedPickupDispatch(input)
     }
+    let detail = `CofePlus dispatch failed (${response.status})`
+    try {
+      const parsed = JSON.parse(response.body) as { message?: string; error?: string }
+      if (parsed.message) detail = parsed.message
+      else if (parsed.error) detail = parsed.error
+    } catch {
+      // keep status text
+    }
     return {
       ok: false,
       environment,
-      error: `CofePlus dispatch failed (${response.status})`,
+      error: detail,
       status: response.status,
       body: response.body,
     }
