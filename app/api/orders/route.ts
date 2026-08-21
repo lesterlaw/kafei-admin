@@ -6,9 +6,7 @@ import { resolveCofeplusEnvironment } from '@/lib/cofeplus/proxy'
 import { matchMenuItem } from '@/lib/cofeplus/product-map'
 import { getActiveCofeplusEnvironment } from '@/lib/cofeplus/settings'
 import {
-  findBusyMachineOrder,
   getQueueSnapshot,
-  syncBusyOrderAndAdvanceQueue,
   tryActivateNextQueuedOrder,
   syntheticPodIdForKiosk,
   type MachineOrderRow,
@@ -274,16 +272,6 @@ export async function POST(request: NextRequest) {
       cofeplusEnv = environment
       orderStatus = 'queued'
 
-      // Finish / advance whoever currently holds the machine before we join
-      const existingBusy = await findBusyMachineOrder(
-        adminClient,
-        podId,
-        environment
-      )
-      if (existingBusy) {
-        await syncBusyOrderAndAdvanceQueue(adminClient, existingBusy)
-      }
-
       console.log(
         `[orders] queueing machine order pod=${podId} item=${itemCode} env=${environment}`
       )
@@ -342,22 +330,27 @@ export async function POST(request: NextRequest) {
     let finalOrder = order
 
     if (cofeplusPodId) {
-      // Activate next (may be this order) once line items exist for item code lookup
-      await tryActivateNextQueuedOrder(adminClient, cofeplusPodId, environment)
-
-      const { data: refreshed } = await adminClient
+      const { data: withItems } = await adminClient
         .from('orders')
         .select('*, kiosks(*), order_items(*, products(*))')
         .eq('id', order.id)
         .single()
 
-      if (refreshed) {
-        finalOrder = refreshed
+      if (withItems) {
+        finalOrder = withItems
       }
 
       queueMeta = await getQueueSnapshot(
         adminClient,
         finalOrder as MachineOrderRow
+      )
+
+      // Do not await CofePlus here. Checkout must return immediately after
+      // payment; the confirmation screen polls and unlocks the QR.
+      void tryActivateNextQueuedOrder(adminClient, cofeplusPodId, environment).catch(
+        (error) => {
+          console.error('[orders] background activate failed', error)
+        }
       )
     }
 
