@@ -1,7 +1,9 @@
 import {
   buildDispatchBody,
+  isDispatchArchivedError,
   parseCreateDispatch,
   parseDispatchSnapshot,
+  selectModifiersFromGroups,
   type CreateDispatchResult,
   type DispatchSnapshot,
   type PodItemOption,
@@ -17,7 +19,18 @@ export interface CreatePickupDispatchInput {
   itemCode: string
   environment: CofeplusEnvironment
   displayNote?: string
+  deliveryPort?: number
+  modifierPreferences?: Record<string, string>
+  /**
+   * pickup = wait for QR scan, then brew (default).
+   * immediate = skip pickup / skip the machine queue and start fulfillment now.
+   */
+  mode?: 'pickup' | 'immediate'
   adminClient?: SupabaseClient
+}
+
+export function isSimulatedDispatchId(dispatchId: string | null | undefined) {
+  return Boolean(dispatchId?.startsWith('sim-'))
 }
 
 export interface CreatePickupDispatchResult {
@@ -104,8 +117,10 @@ export async function createPickupDispatch(
     return { ok: false, environment, error: 'Missing CofePlus item code' }
   }
 
-  // Test mode does not wait on a real machine / scan endpoint
-  if (environment === 'test') {
+  const mode = input.mode === 'immediate' ? 'immediate' : 'pickup'
+  const canCallMachine = !podId.startsWith('kiosk-')
+
+  if (!canCallMachine) {
     return createSimulatedPickupDispatch(input)
   }
 
@@ -120,22 +135,37 @@ export async function createPickupDispatch(
     }
   }
 
+  const modifiers = input.modifierPreferences
+    ? selectModifiersFromGroups(
+        loaded.item.modifierGroups,
+        input.modifierPreferences
+      )
+    : loaded.item.modifiers
+
   const body = buildDispatchBody(loaded.item, {
     lang: 'en',
     channel: 'mobile',
-    deliveryPort: 1,
+    deliveryPort: input.deliveryPort === 2 ? 2 : 1,
     displayNote: input.displayNote || loaded.item.display,
+    modifiers,
   })
 
   const response = await executeCofeplusRequest({
     method: 'POST',
     path: `/partner/v1/dispatches/${encodeURIComponent(podId)}`,
-    query: { mode: 'pickup' },
+    query: { mode },
     body,
     environment,
   })
 
   if (!response.ok) {
+    if (environment === 'test') {
+      console.warn(
+        `[cofeplus] test ${mode} dispatch failed (${response.status}); falling back to simulation`,
+        response.body.slice(0, 200)
+      )
+      return createSimulatedPickupDispatch(input)
+    }
     return {
       ok: false,
       environment,
@@ -147,7 +177,10 @@ export async function createPickupDispatch(
 
   try {
     const dispatch = parseCreateDispatch(response.body)
-    if (!dispatch.pickupCode || dispatch.pickupCode === '(none)') {
+    if (
+      mode === 'pickup' &&
+      (!dispatch.pickupCode || dispatch.pickupCode === '(none)')
+    ) {
       return {
         ok: false,
         environment,
@@ -177,6 +210,79 @@ export async function createPickupDispatch(
   }
 }
 
+export async function listLiveDispatches(
+  podId: string,
+  environment: CofeplusEnvironment
+): Promise<DispatchSnapshot[]> {
+  const response = await executeCofeplusRequest({
+    method: 'GET',
+    path: `/partner/v1/dispatches/${encodeURIComponent(podId)}`,
+    environment,
+  })
+  if (!response.ok) return []
+  try {
+    const data = JSON.parse(response.body) as unknown
+    if (!Array.isArray(data)) return []
+    return data
+      .map((entry) => {
+        try {
+          return parseDispatchSnapshot(JSON.stringify(entry))
+        } catch {
+          return null
+        }
+      })
+      .filter((entry): entry is DispatchSnapshot => entry !== null)
+  } catch {
+    return []
+  }
+}
+
+function completedSnapshot(
+  dispatchId: string,
+  partial?: Partial<DispatchSnapshot>
+): DispatchSnapshot {
+  const rawState = partial?.state
+  const state =
+    rawState === 'failed'
+      ? 'failed'
+      : !rawState || rawState === 'unknown' || rawState === 'ready'
+        ? 'done'
+        : rawState
+
+  return {
+    id: partial?.id || dispatchId,
+    state,
+    orderNumber: partial?.orderNumber || '',
+    pickupCode: partial?.pickupCode || '',
+    archived: true,
+    itemCount: partial?.itemCount ?? 0,
+    lineItemCodes: partial?.lineItemCodes || [],
+  }
+}
+
+async function fetchArchivedOrderSnapshot(
+  podId: string,
+  dispatchId: string,
+  environment: CofeplusEnvironment
+): Promise<DispatchSnapshot | null> {
+  const archived = await executeCofeplusRequest({
+    method: 'GET',
+    path: `/partner/v1/pods/${encodeURIComponent(podId)}/orders/${encodeURIComponent(dispatchId)}`,
+    environment,
+  })
+  if (!archived.ok) {
+    return null
+  }
+  try {
+    return completedSnapshot(
+      dispatchId,
+      parseDispatchSnapshot(archived.body, dispatchId)
+    )
+  } catch {
+    return completedSnapshot(dispatchId)
+  }
+}
+
 export async function fetchDispatchSnapshot(
   podId: string,
   dispatchId: string,
@@ -191,31 +297,88 @@ export async function fetchDispatchSnapshot(
     environment,
   })
 
-  if (!response.ok) {
-    return {
-      ok: false,
-      error: `Failed to fetch dispatch (${response.status})`,
-      status: response.status,
-      body: response.body,
+  if (response.ok) {
+    try {
+      return {
+        ok: true,
+        snapshot: parseDispatchSnapshot(response.body, dispatchId),
+      }
+    } catch (err) {
+      return {
+        ok: false,
+        error:
+          err instanceof Error
+            ? err.message
+            : 'Failed to parse dispatch snapshot',
+        status: response.status,
+        body: response.body,
+      }
     }
   }
 
-  try {
-    return {
-      ok: true,
-      snapshot: parseDispatchSnapshot(response.body),
+  // Collected / finished orders leave the live dispatch API (410 DISPATCH_ARCHIVED).
+  // The admin e2e tester already follows archived history; queue sync must too,
+  // otherwise Kafei stays on "ready" forever and the app keeps polling.
+  const explicitlyArchived =
+    isDispatchArchivedError(response.status, response.body) ||
+    response.status === 410
+  const maybeGone = explicitlyArchived || response.status === 404
+
+  if (maybeGone) {
+    const archived = await fetchArchivedOrderSnapshot(
+      podId,
+      dispatchId,
+      environment
+    )
+    if (archived) {
+      return { ok: true, snapshot: archived }
     }
-  } catch (err) {
-    return {
-      ok: false,
-      error:
-        err instanceof Error
-          ? err.message
-          : 'Failed to parse dispatch snapshot',
-      status: response.status,
-      body: response.body,
+    if (explicitlyArchived) {
+      return { ok: true, snapshot: completedSnapshot(dispatchId) }
     }
   }
+
+  const live = await listLiveDispatches(podId, environment)
+  const match = live.find((entry) => entry.id === dispatchId)
+  if (match) {
+    return { ok: true, snapshot: match }
+  }
+
+  return {
+    ok: false,
+    error: `Failed to fetch dispatch (${response.status})`,
+    status: response.status,
+    body: response.body,
+  }
+}
+
+/** Live pod health. Test mode is always treated as available. */
+export async function fetchPodAvailability(
+  podId: string,
+  environment: CofeplusEnvironment
+): Promise<{ available: boolean; status: string }> {
+  if (environment !== 'live') {
+    return { available: true, status: 'test' }
+  }
+
+  const response = await executeCofeplusRequest({
+    method: 'GET',
+    path: `/partner/v1/pods/${encodeURIComponent(podId)}/status`,
+    environment,
+  })
+
+  const raw = response.body || ''
+  const status = raw.trim() || `http-${response.status}`
+
+  if (!response.ok) {
+    // Don't block the queue on a status-endpoint outage
+    return { available: true, status }
+  }
+
+  const blocked = /offline|fault|error|down|unavailable|stopped|maintenance/i.test(
+    status
+  )
+  return { available: !blocked, status }
 }
 
 /** Map CofePlus dispatch state → Kafei order status */
@@ -229,6 +392,7 @@ export function mapDispatchStateToOrderStatus(
     case 'ready':
       return 'ready'
     case 'done':
+    case 'collected':
       return 'completed'
     case 'failed':
       return 'cancelled'
@@ -236,4 +400,14 @@ export function mapDispatchStateToOrderStatus(
     default:
       return 'pending'
   }
+}
+
+export function mapDispatchSnapshotToOrderStatus(snapshot: {
+  state: string
+  archived: boolean
+}): 'pending' | 'brewing' | 'ready' | 'completed' | 'cancelled' {
+  if (snapshot.archived) {
+    return snapshot.state === 'failed' ? 'cancelled' : 'completed'
+  }
+  return mapDispatchStateToOrderStatus(snapshot.state)
 }

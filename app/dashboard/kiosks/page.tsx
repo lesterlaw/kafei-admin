@@ -13,9 +13,11 @@ import {
 } from '@/components/ui/dialog'
 import { CreateKioskForm } from './create-kiosk-form'
 import { CofeplusSyncButton } from '@/components/api-test/cofeplus-sync-button'
+import { getActiveCofeplusEnvironment } from '@/lib/cofeplus/settings'
 
 export default async function KiosksPage() {
   const kiosks = await getKiosks()
+  const environment = await getActiveCofeplusEnvironment()
 
   return (
     <div className="space-y-6">
@@ -27,7 +29,7 @@ export default async function KiosksPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <CofeplusSyncButton />
+          <CofeplusSyncButton defaultEnvironment={environment} />
           <Dialog>
             <DialogTrigger asChild>
               <Button>

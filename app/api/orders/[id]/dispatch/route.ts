@@ -5,7 +5,10 @@ import {
   createApiResponse,
 } from '@/lib/api/middleware'
 import { createClient } from '@supabase/supabase-js'
-import { fetchDispatchSnapshot } from '@/lib/cofeplus/dispatch'
+import {
+  fetchDispatchSnapshot,
+  isSimulatedDispatchId,
+} from '@/lib/cofeplus/dispatch'
 import { resolveCofeplusEnvironment } from '@/lib/cofeplus/proxy'
 import {
   refreshOrderQueueState,
@@ -140,9 +143,9 @@ export async function GET(
 
     let dispatch = null
     if (
-      currentEnvironment === 'live' &&
       currentOrder.cofeplus_dispatch_id &&
-      currentOrder.cofeplus_pod_id
+      currentOrder.cofeplus_pod_id &&
+      !isSimulatedDispatchId(currentOrder.cofeplus_dispatch_id)
     ) {
       const snapshot = await fetchDispatchSnapshot(
         currentOrder.cofeplus_pod_id,
@@ -153,7 +156,6 @@ export async function GET(
         dispatch = snapshot.snapshot
       }
     } else if (
-      currentEnvironment === 'test' &&
       currentOrder.pickup_code &&
       currentOrder.cofeplus_dispatch_id
     ) {

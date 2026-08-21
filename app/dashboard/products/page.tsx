@@ -14,9 +14,11 @@ import {
 } from '@/components/ui/dialog'
 import { CreateProductForm } from './create-product-form'
 import { CofeplusSyncButton } from '@/components/api-test/cofeplus-sync-button'
+import { getActiveCofeplusEnvironment } from '@/lib/cofeplus/settings'
 
 export default async function ProductsPage() {
   const products = await getProducts()
+  const environment = await getActiveCofeplusEnvironment()
 
   return (
     <div className="space-y-6">
@@ -26,7 +28,7 @@ export default async function ProductsPage() {
           <p className="text-muted-foreground">Manage coffee products</p>
         </div>
         <div className="flex gap-2">
-          <CofeplusSyncButton />
+          <CofeplusSyncButton defaultEnvironment={environment} />
           <Link href="/dashboard/products/add-ons">
             <Button variant="outline">Manage Add-ons</Button>
           </Link>

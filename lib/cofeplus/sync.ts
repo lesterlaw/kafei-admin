@@ -1,13 +1,21 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { CofeplusEnvironment } from '@/lib/cofeplus/config'
+import {
+  podAccessHint,
+  type CofeplusEnvironment,
+} from '@/lib/cofeplus/config'
 import { executeCofeplusRequest } from '@/lib/cofeplus/proxy'
 import {
+  mergeModifiersFromItems,
   parsePodItems,
   parsePods,
   podItemFromCacheRow,
   type PodItemOption,
   type PodSummary,
 } from '@/components/api-test/cofeplus-test-shared'
+import {
+  matchMenuItem,
+  normalizeDrinkName,
+} from '@/lib/cofeplus/product-map'
 
 export interface SyncCatalogOptions {
   environment: CofeplusEnvironment
@@ -28,7 +36,7 @@ export interface SyncCatalogResult {
   error?: string
 }
 
-const MENU_FETCH_TIMEOUT_MS = 12_000
+const MENU_FETCH_TIMEOUT_MS = 30_000
 
 async function fetchPods(environment: CofeplusEnvironment): Promise<PodSummary[]> {
   const response = await executeCofeplusRequest({
@@ -38,7 +46,13 @@ async function fetchPods(environment: CofeplusEnvironment): Promise<PodSummary[]
     timeoutMs: MENU_FETCH_TIMEOUT_MS,
   })
   if (!response.ok) {
-    throw new Error(`List pods failed (${response.status}): ${response.body.slice(0, 240)}`)
+    const detail = response.body.slice(0, 240)
+    if (response.status === 0 || /timeout|NETWORK_ERROR|Connect Timeout/i.test(detail)) {
+      throw new Error(
+        `Live/test CofePlus timed out (${environment} ${response.requestUrl || ''}). Wait a few seconds and retry. If this keeps happening from admin, the machine API may be slow from the server region.`
+      )
+    }
+    throw new Error(`List pods failed (${response.status}): ${detail}`)
   }
   return parsePods(response.body)
 }
@@ -68,10 +82,6 @@ async function fetchPodMenu(
     )
   }
 
-  if (menuItems.length > 0) {
-    return menuItems
-  }
-
   const itemsRes = await executeCofeplusRequest({
     method: 'GET',
     path: `/partner/v1/pods/${encodeURIComponent(podId)}/items`,
@@ -80,18 +90,31 @@ async function fetchPodMenu(
     timeoutMs: MENU_FETCH_TIMEOUT_MS,
   })
 
-  if (!itemsRes.ok) {
+  let catalogItems: PodItemOption[] = []
+  if (itemsRes.ok) {
+    try {
+      catalogItems = parsePodItems(itemsRes.body)
+    } catch (err) {
+      console.error('[cofeplus-sync] parse items failed', err)
+    }
+  } else if (menuItems.length === 0) {
+    const denied =
+      menuRes.status === 403 ||
+      itemsRes.status === 403 ||
+      /POD_ACCESS_DENIED/i.test(`${menuRes.body} ${itemsRes.body}`)
+    if (denied) {
+      throw new Error(podAccessHint(environment, podId))
+    }
     throw new Error(
       `Menu sync failed for ${podId} (menu ${menuRes.status}, items ${itemsRes.status})`
     )
   }
 
-  try {
-    return parsePodItems(itemsRes.body)
-  } catch (err) {
-    console.error('[cofeplus-sync] parse items failed', err)
-    return []
+  if (menuItems.length > 0 && catalogItems.length > 0) {
+    return mergeModifiersFromItems(menuItems, catalogItems)
   }
+  if (menuItems.length > 0) return menuItems
+  return catalogItems
 }
 
 export async function loadSyncedPodItem(
@@ -239,7 +262,7 @@ async function upsertKiosksFromPods(
 }
 
 function normalizeProductName(name: string) {
-  return name.trim().toLowerCase().replace(/\s+/g, ' ')
+  return normalizeDrinkName(name)
 }
 
 async function upsertProductsFromItems(
@@ -282,11 +305,22 @@ async function upsertProductsFromItems(
         upserted += 1
         byCode.set(item.itemCode, { ...existing, cofeplus_item_code: item.itemCode })
       }
-      continue
     }
+  }
 
-    // Leave unmatched CofePlus drinks in cofeplus_menu_items only.
-    // The Kafei product catalog stays curated; dispatch reads the synced cache.
+  const menuCandidates = items
+    .filter((item) => item.itemCode && item.display)
+    .map((item) => ({ itemCode: item.itemCode, display: item.display }))
+
+  for (const product of existingProducts || []) {
+    if (product.cofeplus_item_code) continue
+    const match = matchMenuItem(product.name, menuCandidates)
+    if (!match) continue
+    const { error } = await adminClient
+      .from('products')
+      .update({ cofeplus_item_code: match.itemCode })
+      .eq('id', product.id)
+    if (!error) upserted += 1
   }
 
   return upserted
@@ -313,35 +347,56 @@ export async function syncCofeplusCatalog(
     pods = await fetchPods(environment)
     podsSynced = await upsertPodsCache(adminClient, environment, pods)
 
+    if (!options.podId?.trim() && pods.length > 0) {
+      const keep = pods.map((pod) => pod.podId)
+      await adminClient
+        .from('cofeplus_pods')
+        .delete()
+        .eq('environment', environment)
+        .not('pod_id', 'in', `(${keep.join(',')})`)
+      await adminClient
+        .from('cofeplus_menu_items')
+        .delete()
+        .eq('environment', environment)
+        .not('pod_id', 'in', `(${keep.join(',')})`)
+    }
+
     let targetPods: PodSummary[] = options.podId?.trim()
       ? pods.filter((pod) => pod.podId === options.podId?.trim())
       : pods
 
     if (options.podId?.trim() && targetPods.length === 0) {
-      // Still allow syncing a manually entered pod that wasn't in the list
-      const manualPod = {
-        podId: options.podId.trim(),
-        display: options.podId.trim(),
-      }
-      targetPods = [manualPod]
-      podsSynced = await upsertPodsCache(adminClient, environment, [
-        ...pods,
-        manualPod,
-      ])
+      const requested = options.podId.trim()
+      throw new Error(
+        podAccessHint(
+          environment,
+          requested,
+          pods.map((pod) => pod.podId)
+        )
+      )
     }
 
     const allItems: PodItemOption[] = []
 
     for (const pod of targetPods) {
-      const items = await fetchPodMenu(environment, pod.podId)
-      const saved = await upsertMenuCache(
-        adminClient,
-        environment,
-        pod.podId,
-        items
-      )
-      itemsSynced += saved
-      allItems.push(...items)
+      try {
+        const items = await fetchPodMenu(environment, pod.podId)
+        const saved = await upsertMenuCache(
+          adminClient,
+          environment,
+          pod.podId,
+          items
+        )
+        itemsSynced += saved
+        allItems.push(...items)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Sync failed'
+        if (targetPods.length > 1 && /POD_ACCESS_DENIED|not available on/i.test(message)) {
+          console.warn(`[cofeplus-sync] skip ${pod.podId}: ${message}`)
+          continue
+        }
+        throw err
+      }
     }
 
     if (upsertKafei) {

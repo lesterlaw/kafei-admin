@@ -7,6 +7,7 @@ export interface User {
   updated_at: string
   is_blocked: boolean
   referral_code: string
+  avatar_url?: string | null
 }
 
 export interface Admin {
@@ -96,6 +97,7 @@ export interface Order {
   cofeplus_dispatch_id?: string | null
   cofeplus_pod_id?: string | null
   cofeplus_environment?: 'test' | 'live' | null
+  delivery_port?: number | null
   created_at: string
   updated_at: string
 }

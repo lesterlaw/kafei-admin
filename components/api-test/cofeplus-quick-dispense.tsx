@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { proxyCofeplusRequest } from '@/app/actions/cofeplus'
 import { getOrSyncCofeplusMenu } from '@/app/actions/cofeplus-sync'
+import { suggestPodForEnvironment } from '@/lib/cofeplus/config'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -37,16 +38,20 @@ import {
   TERMINAL_DISPATCH_STATES,
   buildDispatchBody,
   isDispatchArchivedError,
+  modifierExtraTotal,
+  modifiersToChoiceMap,
   parseCreateDispatch,
   parseDispatchSnapshot,
   parseDispatchState,
   podItemFromCacheRow,
+  selectModifiersFromGroups,
   type ConnectionState,
   type CreateDispatchResult,
   type PodItemOption,
   type PodSummary,
 } from './cofeplus-test-shared'
 import type { ApiTestFlowPrefs } from './cofeplus-test-prefs'
+import { CofeplusModifierPicker } from './cofeplus-modifier-picker'
 
 /**
  * One-tap dispense for admin testing.
@@ -65,9 +70,16 @@ export function CofeplusQuickDispense({
 }) {
   const [pods, setPods] = useState<PodSummary[]>([])
   const [podId, setPodId] = useState(
-    savedFlow.podId || connection.defaultPodId || ''
+    suggestPodForEnvironment(
+      connection.environment,
+      savedFlow.podId || connection.defaultPodId || ''
+    )
   )
   const [items, setItems] = useState<PodItemOption[]>([])
+  const [selectedItem, setSelectedItem] = useState<PodItemOption | null>(null)
+  const [modifierChoices, setModifierChoices] = useState<Record<string, string>>(
+    () => ({ ...savedFlow.modifierChoices })
+  )
   const [filter, setFilter] = useState('')
   const [mode, setMode] = useState<'immediate' | 'pickup'>(
     savedFlow.mode || 'immediate'
@@ -84,9 +96,15 @@ export function CofeplusQuickDispense({
   const skipPersistRef = useRef(true)
 
   useEffect(() => {
-    if (!connection.defaultPodId || connection.defaultPodId === podId) return
-    setPodId(connection.defaultPodId)
-  }, [connection.defaultPodId]) // eslint-disable-line react-hooks/exhaustive-deps
+    const next = suggestPodForEnvironment(
+      connection.environment,
+      connection.defaultPodId || podId
+    )
+    if (next && next !== podId) {
+      setPodId(next)
+      setItems([])
+    }
+  }, [connection.defaultPodId, connection.environment]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (skipPersistRef.current) {
@@ -97,9 +115,10 @@ export function CofeplusQuickDispense({
       ...savedFlow,
       podId,
       mode,
-      itemCode: lastItem?.itemCode || savedFlow.itemCode,
+      itemCode: selectedItem?.itemCode || lastItem?.itemCode || savedFlow.itemCode,
+      modifierChoices,
     })
-  }, [podId, mode, lastItem?.itemCode]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [podId, mode, selectedItem?.itemCode, lastItem?.itemCode, modifierChoices]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     return () => {
@@ -141,6 +160,14 @@ export function CofeplusQuickDispense({
         item.category.toLowerCase().includes(q)
     )
   }, [filter, items])
+
+  const configuredModifiers = useMemo(() => {
+    if (!selectedItem) return []
+    return selectModifiersFromGroups(
+      selectedItem.modifierGroups,
+      modifierChoices
+    )
+  }, [selectedItem, modifierChoices])
 
   const request = async (
     label: string,
@@ -241,26 +268,61 @@ export function CofeplusQuickDispense({
     setBusy('menu')
     setError(null)
     try {
-      const result = await getOrSyncCofeplusMenu({
+      let requested = targetPodId.trim()
+      let result = await getOrSyncCofeplusMenu({
         environment: connection.environment,
-        podId: targetPodId.trim(),
+        podId: requested,
+        force: true,
       })
-      const nextPods: PodSummary[] = result.pods.map((pod) => ({
+      let nextPods: PodSummary[] = result.pods.map((pod) => ({
         podId: pod.pod_id,
         display: pod.display || pod.pod_id,
       }))
       setPods(nextPods)
 
-      const merged = result.items
+      let merged = result.items
         .map((row) => podItemFromCacheRow(row))
         .filter((item): item is PodItemOption => item !== null)
 
-      if (merged.length === 0) {
-        throw new Error('No sellable items in the synced menu for this pod')
+      if ((!result.ok || merged.length === 0) && nextPods.length > 0) {
+        const fallback = nextPods.find((pod) => pod.podId !== requested)
+        if (fallback) {
+          requested = fallback.podId
+          setPodId(requested)
+          result = await getOrSyncCofeplusMenu({
+            environment: connection.environment,
+            podId: requested,
+            force: true,
+          })
+          nextPods = result.pods.map((pod) => ({
+            podId: pod.pod_id,
+            display: pod.display || pod.pod_id,
+          }))
+          setPods(nextPods)
+          merged = result.items
+            .map((row) => podItemFromCacheRow(row))
+            .filter((item): item is PodItemOption => item !== null)
+        }
+      }
+
+      if (!result.ok || merged.length === 0) {
+        throw new Error(
+          result.error || 'No sellable items in the synced menu for this pod'
+        )
       }
 
       setItems(merged)
-      onDefaultPodIdChange(targetPodId)
+      setSelectedItem((current) => {
+        const next =
+          merged.find((item) => item.itemCode === current?.itemCode) ||
+          merged.find((item) => item.itemCode === savedFlow.itemCode) ||
+          null
+        if (next) {
+          setModifierChoices(modifiersToChoiceMap(next.modifiers))
+        }
+        return next
+      })
+      onDefaultPodIdChange(requested)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load menu')
     } finally {
@@ -268,11 +330,26 @@ export function CofeplusQuickDispense({
     }
   }
 
-  const handleDispense = async (item: PodItemOption) => {
+  const handleSelectItem = (item: PodItemOption) => {
+    setSelectedItem(item)
+    setModifierChoices(modifiersToChoiceMap(item.modifiers))
+    setError(null)
+  }
+
+  const handleDispense = async (item = selectedItem) => {
+    if (!item) {
+      setError('Select a drink first')
+      return
+    }
     if (!podId.trim()) {
       setError('Enter a pod ID first')
       return
     }
+
+    const modifiers =
+      item.itemCode === selectedItem?.itemCode
+        ? configuredModifiers
+        : item.modifiers
 
     // Always start a fresh order — clear previous flow state + use new idempotency key
     clearActiveDispatch()
@@ -285,6 +362,7 @@ export function CofeplusQuickDispense({
         channel: 'mobile',
         deliveryPort: Number(savedFlow.deliveryPort) || 1,
         displayNote: item.display,
+        modifiers,
       })
 
       const idempotencyKey = `kafei-quick-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
@@ -326,9 +404,8 @@ export function CofeplusQuickDispense({
         <CardHeader>
           <CardTitle>Quick dispense</CardTitle>
           <CardDescription>
-            Tap a drink to fire a new CofePlus order. Each tap uses a fresh
-            idempotency key so you can dispense again without resetting the
-            guided flow.
+            Tap a drink, set milk / temperature / extras, then dispense. Each
+            generate uses a fresh idempotency key.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -341,6 +418,7 @@ export function CofeplusQuickDispense({
                   onValueChange={(value) => {
                     setPodId(value)
                     setItems([])
+                    setSelectedItem(null)
                   }}
                 >
                   <SelectTrigger>
@@ -358,7 +436,9 @@ export function CofeplusQuickDispense({
                 <Input
                   value={podId}
                   onChange={(event) => setPodId(event.target.value)}
-                  placeholder="e.g. RCK111"
+                  placeholder={
+                    connection.environment === 'live' ? 'e.g. RCK541' : 'e.g. RCK111'
+                  }
                 />
               )}
             </div>
@@ -417,24 +497,24 @@ export function CofeplusQuickDispense({
 
           {items.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              Load the menu, then tap a drink to dispense.
+              Load the menu, tap a drink, customise options, then generate.
             </p>
           ) : (
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
               {filteredItems.map((item) => {
                 const isBusy = busy === item.itemCode
-                const isLast = lastItem?.itemCode === item.itemCode
+                const isSelected = selectedItem?.itemCode === item.itemCode
                 return (
                   <button
                     key={item.itemCode}
                     type="button"
                     disabled={busy !== null || item.outOfStock}
-                    onClick={() => void handleDispense(item)}
+                    onClick={() => handleSelectItem(item)}
                     className={cn(
                       'flex flex-col items-start gap-1 rounded-lg border p-3 text-left transition-colors',
                       'hover:border-foreground/30 hover:bg-muted/40',
                       'disabled:cursor-not-allowed disabled:opacity-50',
-                      isLast && 'border-foreground/40 bg-muted/50',
+                      isSelected && 'border-foreground/40 bg-muted/50',
                       item.outOfStock && 'opacity-40'
                     )}
                   >
@@ -460,11 +540,52 @@ export function CofeplusQuickDispense({
                     <code className="text-[10px] text-muted-foreground">
                       {item.itemCode}
                     </code>
+                    {item.modifierGroups.length > 0 ? (
+                      <span className="text-[10px] text-muted-foreground">
+                        {item.modifierGroups.length} options
+                      </span>
+                    ) : null}
                   </button>
                 )
               })}
             </div>
           )}
+
+          {selectedItem ? (
+            <div className="space-y-4 rounded-lg border p-4">
+              <CofeplusModifierPicker
+                item={selectedItem}
+                choices={modifierChoices}
+                onChange={setModifierChoices}
+              />
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-xs text-muted-foreground">
+                  {selectedItem.display}
+                  {modifierExtraTotal(configuredModifiers) > 0
+                    ? ` + extras ${modifierExtraTotal(configuredModifiers)}`
+                    : ''}
+                </p>
+                <Button
+                  type="button"
+                  onClick={() => void handleDispense(selectedItem)}
+                  disabled={busy !== null}
+                >
+                  {busy === selectedItem.itemCode ? (
+                    <Loader2 className="animate-spin" />
+                  ) : mode === 'pickup' ? (
+                    <QrCode />
+                  ) : (
+                    <Play />
+                  )}
+                  {mode === 'pickup' ? 'Generate pickup QR' : 'Dispense now'}
+                </Button>
+              </div>
+            </div>
+          ) : items.length > 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Tap a drink to choose options, then generate.
+            </p>
+          ) : null}
 
           {filteredItems.length === 0 && items.length > 0 && (
             <p className="text-sm text-muted-foreground">

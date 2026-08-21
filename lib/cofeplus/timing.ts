@@ -1,7 +1,7 @@
 import type { CofeplusEnvironment } from '@/lib/cofeplus/config'
 
 /** Simulated / estimated seconds one machine dispense occupies the pod */
-export const TEST_DISPENSE_SECONDS = 5
+export const TEST_DISPENSE_SECONDS = 60
 
 /**
  * Live estimate per drink while waiting (scan + brew + collect).

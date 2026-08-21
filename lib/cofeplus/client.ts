@@ -104,24 +104,55 @@ export async function callCofeplusApi(
   }
 
   try {
-    const controller = new AbortController()
-    const timeoutMs = options.timeoutMs && options.timeoutMs > 0 ? options.timeoutMs : 0
-    const timer =
-      timeoutMs > 0
-        ? setTimeout(() => controller.abort(), timeoutMs)
-        : null
+    const timeoutMs =
+      options.timeoutMs && options.timeoutMs > 0 ? options.timeoutMs : 30_000
 
-    let response: Response
+    let dispatcher: unknown
     try {
-      response = await fetch(requestUrl, {
-        method,
-        headers,
-        body: options.body ?? undefined,
-        cache: 'no-store',
-        signal: controller.signal,
+      const loadUndici = new Function(
+        'return import("node:undici")'
+      ) as () => Promise<{ Agent: new (opts: Record<string, unknown>) => unknown }>
+      const { Agent } = await loadUndici()
+      dispatcher = new Agent({
+        connectTimeout: timeoutMs,
+        headersTimeout: timeoutMs,
+        bodyTimeout: timeoutMs,
+        connect: { timeout: timeoutMs },
       })
-    } finally {
-      if (timer) clearTimeout(timer)
+    } catch {
+      dispatcher = undefined
+    }
+
+    let response: Response | undefined
+    let lastError: unknown
+    const attempts = 3
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), timeoutMs)
+      try {
+        response = await fetch(requestUrl, {
+          method,
+          headers,
+          body: options.body ?? undefined,
+          cache: 'no-store',
+          signal: controller.signal,
+          ...(dispatcher ? { dispatcher } : {}),
+        } as RequestInit)
+        lastError = null
+        break
+      } catch (err) {
+        lastError = err
+        if (attempt === attempts) throw err
+        await new Promise((resolve) => setTimeout(resolve, 500 * attempt))
+      } finally {
+        clearTimeout(timer)
+      }
+    }
+
+    if (!response) {
+      throw lastError instanceof Error
+        ? lastError
+        : new Error('Network request failed')
     }
     const durationMs = Date.now() - startedAt
     const body = await response.text()

@@ -8,7 +8,10 @@ import {
   getSyncedCofeplusPods,
   runCofeplusCatalogSync,
 } from '@/app/actions/cofeplus-sync'
-import type { CofeplusEnvironment } from '@/lib/cofeplus/config'
+import {
+  suggestPodForEnvironment,
+  type CofeplusEnvironment,
+} from '@/lib/cofeplus/config'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -64,7 +67,9 @@ export function CofeplusSyncPanel({
   environment: CofeplusEnvironment
   defaultPodId?: string
 }) {
-  const [podId, setPodId] = useState(defaultPodId)
+  const [podId, setPodId] = useState(
+    suggestPodForEnvironment(environment, defaultPodId)
+  )
   const [upsertKafei, setUpsertKafei] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -91,8 +96,9 @@ export function CofeplusSyncPanel({
   }
 
   useEffect(() => {
-    void loadCached(environment, defaultPodId)
-    if (defaultPodId) setPodId(defaultPodId)
+    const nextPod = suggestPodForEnvironment(environment, defaultPodId)
+    setPodId(nextPod)
+    void loadCached(environment, nextPod)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [environment, defaultPodId])
 
@@ -135,7 +141,11 @@ export function CofeplusSyncPanel({
             <Input
               value={podId}
               onChange={(event) => setPodId(event.target.value)}
-              placeholder="Leave empty to sync all pods, or e.g. RCK111"
+              placeholder={
+                environment === 'live'
+                  ? 'Leave empty to sync all pods, or e.g. RCK541'
+                  : 'Leave empty to sync all pods, or e.g. RCK111'
+              }
               list="synced-pod-options"
             />
             <datalist id="synced-pod-options">

@@ -14,6 +14,10 @@ import {
   executeCofeplusRequest,
   resolveCofeplusEnvironment,
 } from '@/lib/cofeplus/proxy'
+import {
+  getActiveCofeplusEnvironment,
+  setActiveCofeplusEnvironment,
+} from '@/lib/cofeplus/settings'
 
 async function verifyAdmin() {
   const supabase = await createServerSupabaseClient()
@@ -42,6 +46,7 @@ export async function getCofeplusEnvConfig() {
   await verifyAdmin()
   const test = getCofeplusConfig('test')
   const live = getCofeplusConfig('live')
+  const activeEnvironment = await getActiveCofeplusEnvironment()
   return {
     kid: test.kid,
     issuer: test.issuer,
@@ -54,9 +59,17 @@ export async function getCofeplusEnvConfig() {
     hasLiveHmacSecret: live.hasLiveHmacSecret,
     testBaseUrl: test.baseUrl,
     liveBaseUrl: live.baseUrl,
+    activeEnvironment,
     /** Default for initial UI load */
-    baseUrl: test.baseUrl,
+    baseUrl: activeEnvironment === 'live' ? live.baseUrl : test.baseUrl,
   }
+}
+
+export async function saveActiveCofeplusEnvironment(
+  environment: CofeplusEnvironment
+) {
+  await verifyAdmin()
+  return setActiveCofeplusEnvironment(environment)
 }
 
 export async function mintCofeplusAccessToken(

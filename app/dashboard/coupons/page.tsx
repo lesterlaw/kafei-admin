@@ -15,7 +15,7 @@ export default async function CouponsPage() {
           <p className="text-muted-foreground">
             Daily Coupons are per-user drink entitlements from a subscription
             (one QR per day). Promo Codes are marketing discounts such as
-            NEW10. These are not the same, so both pages stay.
+            NEW10.
           </p>
         </div>
         <div className="flex gap-2">

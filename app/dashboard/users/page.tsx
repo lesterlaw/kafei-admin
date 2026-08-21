@@ -59,7 +59,7 @@ export default async function UsersPage() {
         columns={userColumns}
         data={users}
         searchKey="email"
-        getRowHref={(user) => `/dashboard/users/${user.id}`}
+        rowHrefBase="/dashboard/users"
       />
     </div>
   )

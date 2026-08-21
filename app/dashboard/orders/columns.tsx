@@ -135,7 +135,10 @@ export const orderColumns: ColumnDef<any>[] = [
     accessorKey: 'created_at',
     header: 'Date',
     cell: ({ row }) => {
-      return new Date(row.getValue('created_at')).toLocaleDateString()
+      const value = row.getValue('created_at')
+      if (!value) return '—'
+      const date = new Date(String(value))
+      return Number.isNaN(date.getTime()) ? '—' : date.toLocaleDateString()
     },
   },
   {

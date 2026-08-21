@@ -1,7 +1,9 @@
+import Link from 'next/link'
 import { getOrders } from '@/app/actions/data'
 import { DataTable } from '@/components/tables/data-table'
 import { orderColumns } from './columns'
 import { ExportOrdersButton } from './export-button'
+import { Button } from '@/components/ui/button'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,14 +22,19 @@ export default async function OrdersPage() {
           <h1 className="text-3xl font-bold">Order Management</h1>
           <p className="text-muted-foreground">View and manage orders</p>
         </div>
-        <ExportOrdersButton orders={orders} />
+        <div className="flex gap-2">
+          <Button variant="outline" asChild>
+            <Link href="/dashboard/queue">Machine queue</Link>
+          </Button>
+          <ExportOrdersButton orders={orders} />
+        </div>
       </div>
 
       <DataTable
         columns={orderColumns}
         data={orders}
         searchKey="order_number"
-        getRowHref={(order) => `/dashboard/orders/${order.id}`}
+        rowHrefBase="/dashboard/orders"
       />
     </div>
   )

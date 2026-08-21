@@ -25,7 +25,7 @@ export default async function SupportPage() {
         columns={ticketColumns}
         data={tickets}
         searchKey="subject"
-        getRowHref={(ticket) => `/dashboard/support/${ticket.id}`}
+        rowHrefBase="/dashboard/support"
       />
     </div>
   )

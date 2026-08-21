@@ -553,9 +553,20 @@ export function parseDispatchState(raw: string): string {
   }
 }
 
-export function parseDispatchSnapshot(raw: string): DispatchSnapshot {
+export function parseDispatchSnapshot(
+  raw: string,
+  fallbackId = ''
+): DispatchSnapshot {
   const data = asRecord(JSON.parse(raw) as unknown)
-  if (!data || typeof data.id !== 'string' || !data.id) {
+  if (!data || typeof data !== 'object') {
+    throw new Error('Unexpected dispatch/order response shape')
+  }
+
+  const id =
+    (typeof data.id === 'string' && data.id) ||
+    fallbackId ||
+    ''
+  if (!id && typeof data.state !== 'string') {
     throw new Error('Unexpected dispatch/order response shape')
   }
 
@@ -566,9 +577,16 @@ export function parseDispatchSnapshot(raw: string): DispatchSnapshot {
     .map((line) => (typeof line.itemCode === 'string' ? line.itemCode : ''))
     .filter(Boolean)
 
+  const lineState = lineItems
+    .map((line) => asRecord(line)?.status)
+    .find((status): status is string => typeof status === 'string')
+
   return {
-    id: data.id,
-    state: typeof data.state === 'string' ? data.state : 'unknown',
+    id: id || fallbackId || 'unknown',
+    state:
+      typeof data.state === 'string'
+        ? data.state
+        : lineState || 'unknown',
     orderNumber:
       typeof data.orderNumber === 'string'
         ? data.orderNumber

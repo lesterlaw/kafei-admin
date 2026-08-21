@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { proxyCofeplusRequest } from '@/app/actions/cofeplus'
 import { getOrSyncCofeplusMenu } from '@/app/actions/cofeplus-sync'
+import { suggestPodForEnvironment } from '@/lib/cofeplus/config'
 import type { CofeplusResponse } from '@/lib/cofeplus/client'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -163,7 +164,10 @@ export function CofeplusE2eFlow({
 
   const [pods, setPods] = useState<PodSummary[]>([])
   const [podId, setPodId] = useState(
-    savedFlow.podId || connection.defaultPodId || ''
+    suggestPodForEnvironment(
+      connection.environment,
+      savedFlow.podId || connection.defaultPodId || ''
+    )
   )
   const [podStatus, setPodStatus] = useState<string | null>(null)
 
@@ -216,9 +220,15 @@ export function CofeplusE2eFlow({
   })
 
   useEffect(() => {
-    if (!connection.defaultPodId || connection.defaultPodId === podId) return
-    setPodId(connection.defaultPodId)
-  }, [connection.defaultPodId]) // eslint-disable-line react-hooks/exhaustive-deps -- sync from Connection card only
+    const next = suggestPodForEnvironment(
+      connection.environment,
+      connection.defaultPodId || podId
+    )
+    if (next && next !== podId) {
+      setPodId(next)
+      setItems([])
+    }
+  }, [connection.defaultPodId, connection.environment]) // eslint-disable-line react-hooks/exhaustive-deps -- sync from Connection card only
 
   useEffect(() => {
     if (skipPersistRef.current) {
@@ -357,9 +367,20 @@ export function CofeplusE2eFlow({
         display: pod.display || pod.pod_id,
       }))
       setPods(nextPods)
-      if (!podId && nextPods[0]) {
-        setPodId(nextPods[0].podId)
-        onDefaultPodIdChange(nextPods[0].podId)
+      if (result.error && nextPods.length === 0) {
+        throw new Error(result.error)
+      }
+      const nextPodId =
+        (podId && nextPods.some((pod) => pod.podId === podId)
+          ? podId
+          : nextPods[0]?.podId) ||
+        suggestPodForEnvironment(connection.environment, podId)
+      if (nextPodId && nextPodId !== podId) {
+        setPodId(nextPodId)
+        onDefaultPodIdChange(nextPodId)
+      }
+      if (result.error && !result.items.length) {
+        setError(result.error)
       }
       setCurrentStep(1)
     } catch (err) {
@@ -413,8 +434,10 @@ export function CofeplusE2eFlow({
       .filter((item): item is PodItemOption => item !== null)
 
     setItems(nextItems)
-    if (nextItems.length === 0) {
-      throw new Error('No sellable items in the synced menu for this pod')
+    if (!result.ok || nextItems.length === 0) {
+      throw new Error(
+        result.error || 'No sellable items in the synced menu for this pod'
+      )
     }
 
     const preferredCode = options?.preferItemCode?.trim()
@@ -868,7 +891,9 @@ export function CofeplusE2eFlow({
                         setPodId(value)
                         onDefaultPodIdChange(value)
                       }}
-                      placeholder="RCK111"
+                      placeholder={
+                        connection.environment === 'live' ? 'RCK541' : 'RCK111'
+                      }
                     />
                   )}
                 </div>

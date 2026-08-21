@@ -3,6 +3,8 @@ import { createApiResponse, createApiError, authenticateRequest } from '@/lib/ap
 import { createClient } from '@supabase/supabase-js'
 import { z } from 'zod'
 import { resolveCofeplusEnvironment } from '@/lib/cofeplus/proxy'
+import { matchMenuItem } from '@/lib/cofeplus/product-map'
+import { getActiveCofeplusEnvironment } from '@/lib/cofeplus/settings'
 import {
   findBusyMachineOrder,
   getQueueSnapshot,
@@ -90,10 +92,12 @@ export async function POST(request: NextRequest) {
       return createApiError('Invalid order payload', 400)
     }
 
-    const { kiosk_id, product_id, addons, coupon_id, cofeplus_environment } =
+    const { kiosk_id, product_id, addons, coupon_id } =
       validationResult.data
-    const environment = resolveCofeplusEnvironment(cofeplus_environment)
     const adminClient = getAdminClient()
+    const environment = resolveCofeplusEnvironment(
+      await getActiveCofeplusEnvironment(adminClient)
+    )
 
     const { data: userData, error: userError } = await adminClient
       .from('users')
@@ -108,7 +112,7 @@ export async function POST(request: NextRequest) {
 
     const { data: product, error: productError } = await adminClient
       .from('products')
-      .select('price, name, cofeplus_item_code')
+      .select('price, name, temperature, cofeplus_item_code')
       .eq('id', product_id)
       .single()
 
@@ -218,7 +222,7 @@ export async function POST(request: NextRequest) {
 
     const kioskPod =
       typeof kiosk.pod_id === 'string' ? kiosk.pod_id.trim() : ''
-    const itemCode =
+    let itemCode =
       typeof product.cofeplus_item_code === 'string'
         ? product.cofeplus_item_code.trim()
         : ''
@@ -233,10 +237,35 @@ export async function POST(request: NextRequest) {
       kioskPod ||
       (environment === 'test' ? syntheticPodIdForKiosk(kiosk.id) : '')
 
+    if (podId && !itemCode && product.name) {
+      let menuQuery = adminClient
+        .from('cofeplus_menu_items')
+        .select('item_code, display')
+        .eq('environment', environment)
+      if (kioskPod) {
+        menuQuery = menuQuery.eq('pod_id', kioskPod)
+      }
+      const { data: menuItems } = await menuQuery
+      const match = matchMenuItem(
+        product.name,
+        (menuItems || []).map((row) => ({
+          itemCode: row.item_code,
+          display: row.display,
+        }))
+      )
+      if (match) {
+        itemCode = match.itemCode
+        await adminClient
+          .from('products')
+          .update({ cofeplus_item_code: match.itemCode })
+          .eq('id', product_id)
+      }
+    }
+
     if (podId) {
       if (!itemCode && environment === 'live') {
         return createApiError(
-          'This kiosk is linked to a machine, but the product has no CofePlus item code. Set cofeplus_item_code on the product in admin.',
+          'This drink is not on the machine menu for this kiosk. Map it in admin or pick another drink.',
           400
         )
       }

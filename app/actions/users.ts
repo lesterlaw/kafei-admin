@@ -28,8 +28,8 @@ async function verifyAdmin() {
 }
 
 export async function getUsers() {
-  await verifyAdmin()
   try {
+    await verifyAdmin()
     const supabase = createAdminClient()
     const { data, error } = await supabase
       .from('users')
@@ -41,7 +41,7 @@ export async function getUsers() {
       return []
     }
 
-    return data || []
+    return JSON.parse(JSON.stringify(data || []))
   } catch (error) {
     console.error('getUsers:', error)
     return []
@@ -49,8 +49,8 @@ export async function getUsers() {
 }
 
 export async function getUserById(id: string) {
-  await verifyAdmin()
   try {
+    await verifyAdmin()
     const supabase = createAdminClient()
     const { data, error } = await supabase
       .from('users')

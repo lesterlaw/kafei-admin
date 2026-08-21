@@ -6,12 +6,14 @@ import {
   getCofeplusEnvConfig,
   mintCofeplusAccessToken,
   proxyCofeplusRequest,
+  saveActiveCofeplusEnvironment,
 } from '@/app/actions/cofeplus'
 import type { CofeplusResponse } from '@/lib/cofeplus/client'
 import {
   COFEPLUS_DOCS_URL,
   COFEPLUS_LIVE_BASE_URL,
   COFEPLUS_TEST_BASE_URL,
+  suggestPodForEnvironment,
   type CofeplusEnvironment,
 } from '@/lib/cofeplus/config'
 import { Badge } from '@/components/ui/badge'
@@ -547,7 +549,16 @@ export function CofeplusApiTester() {
   const [mintError, setMintError] = useState<string | null>(null)
 
   useEffect(() => {
-    const next = applyUrlOverrides(loadApiTestPrefs())
+    const loaded = applyUrlOverrides(loadApiTestPrefs())
+    const defaultPodId = suggestPodForEnvironment(
+      loaded.environment,
+      loaded.defaultPodId
+    )
+    const next = {
+      ...loaded,
+      defaultPodId,
+      flow: { ...loaded.flow, podId: defaultPodId || loaded.flow.podId },
+    }
     setPrefs(next)
     setViewMode(next.viewMode)
     setConnection((prev) => {
@@ -605,7 +616,15 @@ export function CofeplusApiTester() {
     void getCofeplusEnvConfig()
       .then((config) => {
         setConnection((prev) => {
-          const environment = prev.environment
+          const environment =
+            config.activeEnvironment === 'live' ||
+            config.activeEnvironment === 'test'
+              ? config.activeEnvironment
+              : prev.environment
+          const defaultPodId = suggestPodForEnvironment(
+            environment,
+            prev.defaultPodId
+          )
           const baseUrl =
             environment === 'live'
               ? config.liveBaseUrl || prev.liveBaseUrl
@@ -617,6 +636,8 @@ export function CofeplusApiTester() {
 
           return {
             ...prev,
+            environment,
+            defaultPodId,
             baseUrl,
             hasEnvToken: config.hasAccessToken,
             hasHmacSecret,
@@ -659,6 +680,13 @@ export function CofeplusApiTester() {
 
   const handleEnvironmentChange = (environment: CofeplusEnvironment) => {
     setMintError(null)
+    void saveActiveCofeplusEnvironment(environment).catch((err) => {
+      setMintError(
+        err instanceof Error
+          ? err.message
+          : 'Failed to save environment for the mobile app'
+      )
+    })
     setConnection((prev) => {
       const baseUrl =
         environment === 'live' ? prev.liveBaseUrl : prev.testBaseUrl
@@ -666,6 +694,10 @@ export function CofeplusApiTester() {
         environment === 'live'
           ? prev.hasLiveHmacSecret
           : prev.hasTestHmacSecret
+      const defaultPodId = suggestPodForEnvironment(
+        environment,
+        prev.defaultPodId
+      )
 
       return {
         ...prev,
@@ -674,6 +706,7 @@ export function CofeplusApiTester() {
         hasHmacSecret,
         accessToken: '',
         tokenExpiresAt: null,
+        defaultPodId,
       }
     })
   }
@@ -736,6 +769,8 @@ export function CofeplusApiTester() {
               Test → <code>{connection.testBaseUrl}</code>
               {' · '}
               Live → <code>{connection.liveBaseUrl}</code>
+              {' · '}
+              This switch is what the mobile app uses for new orders.
             </p>
           </div>
           <div className="space-y-2 md:col-span-2">
@@ -818,7 +853,9 @@ export function CofeplusApiTester() {
                   defaultPodId: event.target.value,
                 }))
               }
-              placeholder="RCK111"
+              placeholder={
+                connection.environment === 'live' ? 'RCK541' : 'RCK111'
+              }
             />
             <p className="text-xs text-muted-foreground">
               Saved in this browser with env, item, and dispatch settings. Deep

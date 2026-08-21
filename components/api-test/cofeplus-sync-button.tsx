@@ -3,6 +3,10 @@
 import { useState } from 'react'
 import { Loader2, RefreshCw } from 'lucide-react'
 import { runCofeplusCatalogSync } from '@/app/actions/cofeplus-sync'
+import {
+  suggestPodForEnvironment,
+  type CofeplusEnvironment,
+} from '@/lib/cofeplus/config'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -22,14 +26,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import type { CofeplusEnvironment } from '@/lib/cofeplus/config'
-
 /**
  * Compact Sync button for Kiosks / Products pages.
  */
 export function CofeplusSyncButton({
   defaultEnvironment = 'test',
-  defaultPodId = 'RCK111',
+  defaultPodId,
 }: {
   defaultEnvironment?: CofeplusEnvironment
   defaultPodId?: string
@@ -37,7 +39,9 @@ export function CofeplusSyncButton({
   const [open, setOpen] = useState(false)
   const [environment, setEnvironment] =
     useState<CofeplusEnvironment>(defaultEnvironment)
-  const [podId, setPodId] = useState(defaultPodId)
+  const [podId, setPodId] = useState(
+    defaultPodId ?? suggestPodForEnvironment(defaultEnvironment)
+  )
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -93,9 +97,11 @@ export function CofeplusSyncButton({
             <Label>Environment</Label>
             <Select
               value={environment}
-              onValueChange={(value) =>
-                setEnvironment(value as CofeplusEnvironment)
-              }
+              onValueChange={(value) => {
+                const next = value as CofeplusEnvironment
+                setEnvironment(next)
+                setPodId((current) => suggestPodForEnvironment(next, current))
+              }}
             >
               <SelectTrigger>
                 <SelectValue />
@@ -111,7 +117,11 @@ export function CofeplusSyncButton({
             <Input
               value={podId}
               onChange={(event) => setPodId(event.target.value)}
-              placeholder="Empty = all pods, or RCK111"
+              placeholder={
+                environment === 'live'
+                  ? 'Empty = all live pods, or RCK541'
+                  : 'Empty = all test pods, or RCK111'
+              }
             />
           </div>
           {error && (

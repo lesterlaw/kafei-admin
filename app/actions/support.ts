@@ -28,8 +28,8 @@ async function verifyAdmin() {
 }
 
 export async function getSupportTickets() {
-  await verifyAdmin()
   try {
+    await verifyAdmin()
     const supabase = createAdminClient()
     const embedded = await supabase
       .from('support_tickets')

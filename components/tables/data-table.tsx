@@ -29,7 +29,15 @@ interface DataTableProps<TData, TValue> {
   data: TData[]
   searchKey?: string
   searchPlaceholder?: string
-  getRowHref?: (row: TData) => string | undefined
+  /** Serializable path prefix, e.g. /dashboard/users → /dashboard/users/{id} */
+  rowHrefBase?: string
+}
+
+function rowHref(row: unknown, rowHrefBase?: string) {
+  if (!rowHrefBase) return undefined
+  const id = (row as { id?: string })?.id
+  if (!id) return undefined
+  return `${rowHrefBase.replace(/\/$/, '')}/${id}`
 }
 
 export function DataTable<TData, TValue>({
@@ -37,7 +45,7 @@ export function DataTable<TData, TValue>({
   data,
   searchKey,
   searchPlaceholder = 'Search...',
-  getRowHref,
+  rowHrefBase,
 }: DataTableProps<TData, TValue>) {
   const router = useRouter()
   const [sorting, setSorting] = React.useState<SortingState>([])
@@ -93,7 +101,7 @@ export function DataTable<TData, TValue>({
           <TableBody>
             {table.getRowModel().rows?.length ? (
               table.getRowModel().rows.map((row) => {
-                const href = getRowHref?.(row.original)
+                const href = rowHref(row.original, rowHrefBase)
                 return (
                   <TableRow
                     key={row.id}

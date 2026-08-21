@@ -11,6 +11,7 @@ import {
   Receipt,
   Package,
   ShoppingCart,
+  ListOrdered,
   Gift,
   Ticket,
   Coffee,
@@ -77,6 +78,11 @@ const navItems = [
         title: 'Orders',
         url: '/dashboard/orders',
         icon: ShoppingCart,
+      },
+      {
+        title: 'Queue',
+        url: '/dashboard/queue',
+        icon: ListOrdered,
       },
       {
         title: 'Kiosks',
