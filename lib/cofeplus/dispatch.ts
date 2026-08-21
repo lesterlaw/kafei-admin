@@ -218,44 +218,59 @@ export async function createPickupDispatch(
   }
 }
 
-export async function listLiveDispatches(
+export async function listLiveDispatchesResult(
   podId: string,
   environment: CofeplusEnvironment
-): Promise<DispatchSnapshot[]> {
+): Promise<
+  | { ok: true; items: DispatchSnapshot[] }
+  | { ok: false; status?: number }
+> {
   const response = await executeCofeplusRequest({
     method: 'GET',
     path: `/partner/v1/dispatches/${encodeURIComponent(podId)}`,
     environment,
   })
-  if (!response.ok) return []
+  if (!response.ok) {
+    return { ok: false, status: response.status }
+  }
   try {
     const data = JSON.parse(response.body) as unknown
-    if (!Array.isArray(data)) return []
-    return data
+    if (!Array.isArray(data)) {
+      return { ok: false, status: response.status }
+    }
+    const items = data
       .map((entry) => {
         try {
-          return parseDispatchSnapshot(JSON.stringify(entry))
+          const record = entry as { id?: string }
+          return parseDispatchSnapshot(
+            JSON.stringify(entry),
+            typeof record.id === 'string' ? record.id : ''
+          )
         } catch {
           return null
         }
       })
       .filter((entry): entry is DispatchSnapshot => entry !== null)
+    return { ok: true, items }
   } catch {
-    return []
+    return { ok: false, status: response.status }
   }
+}
+
+export async function listLiveDispatches(
+  podId: string,
+  environment: CofeplusEnvironment
+): Promise<DispatchSnapshot[]> {
+  const result = await listLiveDispatchesResult(podId, environment)
+  return result.ok ? result.items : []
 }
 
 function completedSnapshot(
   dispatchId: string,
   partial?: Partial<DispatchSnapshot>
 ): DispatchSnapshot {
-  const rawState = partial?.state
-  const state =
-    rawState === 'failed'
-      ? 'failed'
-      : !rawState || rawState === 'unknown' || rawState === 'ready'
-        ? 'done'
-        : rawState
+  const rawState = (partial?.state || '').toLowerCase()
+  const state = rawState === 'failed' ? 'failed' : 'done'
 
   return {
     id: partial?.id || dispatchId,
@@ -291,26 +306,99 @@ async function fetchArchivedOrderSnapshot(
   }
 }
 
-export async function fetchDispatchSnapshot(
+function isTerminalDispatchState(state: string) {
+  return state === 'done' || state === 'failed' || state === 'collected'
+}
+
+async function resolveArchivedSnapshot(
   podId: string,
   dispatchId: string,
   environment: CofeplusEnvironment
+): Promise<DispatchSnapshot> {
+  const archived = await fetchArchivedOrderSnapshot(
+    podId,
+    dispatchId,
+    environment
+  )
+  return archived || completedSnapshot(dispatchId)
+}
+
+export async function fetchDispatchSnapshot(
+  podId: string,
+  dispatchId: string,
+  environment: CofeplusEnvironment,
+  options?: { completeIfMissing?: boolean }
 ): Promise<
   | { ok: true; snapshot: DispatchSnapshot }
   | { ok: false; error: string; status?: number; body?: string }
 > {
+  const completeIfMissing = options?.completeIfMissing !== false
   const response = await executeCofeplusRequest({
     method: 'GET',
     path: `/partner/v1/dispatches/${encodeURIComponent(podId)}/${encodeURIComponent(dispatchId)}`,
     environment,
   })
 
+  // Docs: GET /partner/v1/dispatches/{podId}/{orderId} → 404 when the
+  // order has left the live fulfillment table. Archived history is
+  // GET /partner/v1/pods/{podId}/orders/{orderId} (state done | failed).
+  // Older gate builds used 410 DISPATCH_ARCHIVED for the same case.
+  const leftLiveTable =
+    response.status === 404 ||
+    response.status === 410 ||
+    isDispatchArchivedError(response.status, response.body)
+
+  if (leftLiveTable) {
+    const archived = await fetchArchivedOrderSnapshot(
+      podId,
+      dispatchId,
+      environment
+    )
+    if (archived) {
+      return { ok: true, snapshot: archived }
+    }
+
+    const live = await listLiveDispatchesResult(podId, environment)
+    if (live.ok) {
+      const match = live.items.find((entry) => entry.id === dispatchId)
+      if (match) {
+        return { ok: true, snapshot: match }
+      }
+    }
+
+    if (completeIfMissing) {
+      console.log(
+        `[cofeplus] dispatch ${dispatchId} left live table (${response.status}); marking done`
+      )
+      return { ok: true, snapshot: completedSnapshot(dispatchId) }
+    }
+
+    return {
+      ok: false,
+      error: `Dispatch is not live (${response.status})`,
+      status: response.status,
+      body: response.body,
+    }
+  }
+
   if (response.ok) {
     try {
-      return {
-        ok: true,
-        snapshot: parseDispatchSnapshot(response.body, dispatchId),
+      const snapshot = parseDispatchSnapshot(response.body, dispatchId)
+      if (snapshot.archived || isTerminalDispatchState(snapshot.state)) {
+        return { ok: true, snapshot }
       }
+
+      // Docs: list live dispatches never includes archived orders.
+      // A stale GET-by-id can still return making after collection.
+      const live = await listLiveDispatchesResult(podId, environment)
+      if (live.ok && !live.items.some((entry) => entry.id === dispatchId)) {
+        return {
+          ok: true,
+          snapshot: await resolveArchivedSnapshot(podId, dispatchId, environment),
+        }
+      }
+
+      return { ok: true, snapshot }
     } catch (err) {
       return {
         ok: false,
@@ -324,32 +412,16 @@ export async function fetchDispatchSnapshot(
     }
   }
 
-  // Collected / finished orders leave the live dispatch API (410 DISPATCH_ARCHIVED).
-  // The admin e2e tester already follows archived history; queue sync must too,
-  // otherwise Kafei stays on "ready" forever and the app keeps polling.
-  const explicitlyArchived =
-    isDispatchArchivedError(response.status, response.body) ||
-    response.status === 410
-  const maybeGone = explicitlyArchived || response.status === 404
-
-  if (maybeGone) {
-    const archived = await fetchArchivedOrderSnapshot(
-      podId,
-      dispatchId,
-      environment
-    )
-    if (archived) {
-      return { ok: true, snapshot: archived }
+  const live = await listLiveDispatchesResult(podId, environment)
+  if (live.ok) {
+    const match = live.items.find((entry) => entry.id === dispatchId)
+    if (match) {
+      return { ok: true, snapshot: match }
     }
-    if (explicitlyArchived) {
-      return { ok: true, snapshot: completedSnapshot(dispatchId) }
+    return {
+      ok: true,
+      snapshot: await resolveArchivedSnapshot(podId, dispatchId, environment),
     }
-  }
-
-  const live = await listLiveDispatches(podId, environment)
-  const match = live.find((entry) => entry.id === dispatchId)
-  if (match) {
-    return { ok: true, snapshot: match }
   }
 
   return {
@@ -389,20 +461,25 @@ export async function fetchPodAvailability(
   return { available: !blocked, status }
 }
 
-/** Map CofePlus dispatch state → Kafei order status */
+/** Map CofePlus FetchDispatchState → Kafei order status */
 export function mapDispatchStateToOrderStatus(
   state: string
 ): 'pending' | 'brewing' | 'ready' | 'completed' | 'cancelled' {
-  switch (state) {
+  switch (state.trim().toLowerCase()) {
     case 'accepted':
     case 'making':
+    case 'brewing':
       return 'brewing'
     case 'ready':
       return 'ready'
     case 'done':
     case 'collected':
+    case 'completed':
+    case 'complete':
       return 'completed'
     case 'failed':
+    case 'cancelled':
+    case 'canceled':
       return 'cancelled'
     case 'pending':
     default:

@@ -571,22 +571,35 @@ export function parseDispatchSnapshot(
   }
 
   const lineItems = Array.isArray(data.lineItems) ? data.lineItems : []
-  const lineItemCodes = lineItems
+  const lineRecords = lineItems
     .map((line) => asRecord(line))
     .filter((line): line is Record<string, unknown> => line !== null)
+  const lineItemCodes = lineRecords
     .map((line) => (typeof line.itemCode === 'string' ? line.itemCode : ''))
     .filter(Boolean)
 
-  const lineState = lineItems
-    .map((line) => asRecord(line)?.status)
-    .find((status): status is string => typeof status === 'string')
+  const lineStatuses = lineRecords
+    .map((line) => (typeof line.status === 'string' ? line.status.toLowerCase() : ''))
+    .filter(Boolean)
+
+  let state =
+    typeof data.state === 'string' && data.state
+      ? data.state.toLowerCase()
+      : lineStatuses[0] || 'unknown'
+
+  // Official FetchDispatchState / DispatchLineItemStatus:
+  // pending, accepted, making, ready, done, failed.
+  // If every line is already terminal, trust that over a stale parent state.
+  const allLinesTerminal =
+    lineStatuses.length > 0 &&
+    lineStatuses.every((status) => status === 'done' || status === 'failed')
+  if (allLinesTerminal) {
+    state = lineStatuses.some((status) => status === 'failed') ? 'failed' : 'done'
+  }
 
   return {
     id: id || fallbackId || 'unknown',
-    state:
-      typeof data.state === 'string'
-        ? data.state
-        : lineState || 'unknown',
+    state,
     orderNumber:
       typeof data.orderNumber === 'string'
         ? data.orderNumber
@@ -595,7 +608,10 @@ export function parseDispatchSnapshot(
           : '(none)',
     pickupCode:
       typeof data.pickupCode === 'string' ? data.pickupCode : '(none)',
-    archived: typeof data.archivedAt === 'string' && Boolean(data.archivedAt),
+    archived:
+      data.archived === true ||
+      (typeof data.archivedAt === 'string' && Boolean(data.archivedAt)) ||
+      (typeof data.timeArchived === 'string' && Boolean(data.timeArchived)),
     itemCount: typeof data.itemCount === 'number' ? data.itemCount : lineItemCodes.length,
     lineItemCodes,
   }

@@ -637,7 +637,12 @@ export async function syncBusyOrderAndAdvanceQueue(
       const snapshot = await fetchDispatchSnapshot(
         podId,
         current.cofeplus_dispatch_id,
-        environment
+        environment,
+        {
+          // pending + 404 can be a create delay. brewing/ready + gone
+          // means the cup was collected and left the live table.
+          completeIfMissing: current.status !== 'pending',
+        }
       )
 
       if (snapshot.ok) {
