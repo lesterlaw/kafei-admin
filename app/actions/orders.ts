@@ -59,8 +59,8 @@ export async function getOrders() {
 }
 
 export async function getOrderById(id: string) {
-  await verifyAdmin()
   try {
+    await verifyAdmin()
     const supabase = createAdminClient()
     const embedded = await supabase
       .from('orders')
@@ -113,20 +113,38 @@ export async function getOrderById(id: string) {
 }
 
 export async function updateOrderStatus(id: string, status: string) {
-  await verifyAdmin()
-  const supabase = createAdminClient()
-  const { error } = await supabase
-    .from('orders')
-    .update({ status })
-    .eq('id', id)
+  try {
+    await verifyAdmin()
+    const supabase = createAdminClient()
+    const { data: order, error } = await supabase
+      .from('orders')
+      .update({ status })
+      .eq('id', id)
+      .select('id, user_id, status')
+      .maybeSingle()
 
-  if (error) {
-    return { error: error.message }
+    if (error) {
+      return { error: error.message }
+    }
+
+    if (order?.user_id && status === 'completed') {
+      try {
+        const { activateReferralOnFirstDrink } = await import(
+          '@/lib/product-logic/referrals'
+        )
+        await activateReferralOnFirstDrink(supabase, order.user_id)
+      } catch (referralError) {
+        console.error('Referral activation after admin complete failed:', referralError)
+      }
+    }
+
+    revalidatePath('/dashboard/orders')
+    revalidatePath(`/dashboard/orders/${id}`)
+    return { success: true }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to update order'
+    return { error: message }
   }
-
-  revalidatePath('/dashboard/orders')
-  revalidatePath(`/dashboard/orders/${id}`)
-  return { success: true }
 }
 
 export async function deleteOrder(id: string) {

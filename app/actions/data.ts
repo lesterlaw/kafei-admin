@@ -211,17 +211,32 @@ export async function getSupportTickets() {
 }
 
 export async function getReferrals() {
-  await verifyAdmin()
-  const supabase = createAdminClient()
-  const { data, error } = await supabase
-    .from('referrals')
-    .select('*, referrer:users!referrals_referrer_id_fkey(email, full_name), referred:users!referrals_referred_id_fkey(email, full_name)')
-    .order('created_at', { ascending: false })
+  try {
+    await verifyAdmin()
+    const supabase = createAdminClient()
+    const embedded = await supabase
+      .from('referrals')
+      .select('*, referrer:users!referrals_referrer_id_fkey(email, full_name), referred:users!referrals_referred_id_fkey(email, full_name)')
+      .order('created_at', { ascending: false })
 
-  if (error) {
-    throw new Error(error.message)
+    if (!embedded.error) {
+      return embedded.data || []
+    }
+
+    const fallback = await supabase
+      .from('referrals')
+      .select('*')
+      .order('created_at', { ascending: false })
+
+    if (fallback.error) {
+      console.error('getReferrals:', fallback.error.message)
+      return []
+    }
+
+    return fallback.data || []
+  } catch (error) {
+    console.error('getReferrals:', error)
+    return []
   }
-
-  return data || []
 }
 

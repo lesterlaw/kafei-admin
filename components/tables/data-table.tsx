@@ -31,12 +31,13 @@ interface DataTableProps<TData, TValue> {
   searchPlaceholder?: string
   /** Serializable path prefix, e.g. /dashboard/users → /dashboard/users/{id} */
   rowHrefBase?: string
+  rowHrefIdKey?: string
 }
 
-function rowHref(row: unknown, rowHrefBase?: string) {
+function rowHref(row: unknown, rowHrefBase?: string, idKey = 'id') {
   if (!rowHrefBase) return undefined
-  const id = (row as { id?: string })?.id
-  if (!id) return undefined
+  const id = (row as Record<string, unknown>)?.[idKey]
+  if (typeof id !== 'string' || !id) return undefined
   return `${rowHrefBase.replace(/\/$/, '')}/${id}`
 }
 
@@ -46,6 +47,7 @@ export function DataTable<TData, TValue>({
   searchKey,
   searchPlaceholder = 'Search...',
   rowHrefBase,
+  rowHrefIdKey = 'id',
 }: DataTableProps<TData, TValue>) {
   const router = useRouter()
   const [sorting, setSorting] = React.useState<SortingState>([])
@@ -101,7 +103,7 @@ export function DataTable<TData, TValue>({
           <TableBody>
             {table.getRowModel().rows?.length ? (
               table.getRowModel().rows.map((row) => {
-                const href = rowHref(row.original, rowHrefBase)
+                const href = rowHref(row.original, rowHrefBase, rowHrefIdKey)
                 return (
                   <TableRow
                     key={row.id}
@@ -112,7 +114,7 @@ export function DataTable<TData, TValue>({
                       const target = event.target as HTMLElement
                       if (
                         target.closest(
-                          'a, button, input, textarea, [role="dialog"], [data-no-row-nav]'
+                          'a, button, input, select, textarea, option, [role="dialog"], [role="combobox"], [role="listbox"], [role="option"], [data-slot="select-content"], [data-no-row-nav]'
                         )
                       ) {
                         return

@@ -22,51 +22,76 @@ async function seedData() {
 
   console.log('Starting data seed...\n')
 
-  // Seed Subscription Tiers
+  // Seed Subscription Tiers (Free / Monthly $29 / Annual $249)
   console.log('Seeding subscription tiers...')
   const subscriptionTiers = [
     {
+      name: 'Free Plan',
+      description: 'First drink + Stamps + Beans + Ads',
+      price: 0,
+      period: 'free',
+      features: [
+        'Welcome: 1 Latte/Americano + 5 Beans',
+        '7 Stamps = 1 Latte or Americano',
+        'Daily check-in: +1 Stamp + 5 Beans',
+        'Basic Bean rewards (60-day expiry)',
+      ],
+      coupon_per_day: 0,
+      is_hidden: false,
+    },
+    {
       name: 'Monthly Plan',
-      description: 'Perfect for trying out our service',
-      price: 29.00,
+      description: 'Daily All-Drinks membership — 1 coupon / 24h, Beans, no ads',
+      price: 29.0,
       period: 'monthly',
-      features: ['1 coffee per day', 'Exclusive deals', 'Priority support'],
+      features: [
+        '1 All-Drinks coupon every 24h',
+        'Daily check-in: +5 Beans',
+        'All Bean rewards (no Free-plan expiry)',
+        'Second cup 50% off',
+      ],
       coupon_per_day: 1,
+      is_hidden: false,
     },
     {
       name: 'Annual Plan',
-      description: 'Best value for coffee lovers',
-      price: 299.00,
+      description:
+        'Same membership, best value — All Drinks, 5 Beans/day, full Bean rewards',
+      price: 249.0,
       period: 'annual',
-      features: ['1 coffee per day', '2 months free', 'Exclusive deals', 'Priority support', 'Early access to new drinks'],
+      features: [
+        '1 All-Drinks coupon every 24h',
+        'Daily check-in: +5 Beans',
+        'All Bean rewards (no Free-plan expiry)',
+        'Second cup 50% off',
+        'Effective $20.75 / month',
+      ],
       coupon_per_day: 1,
-    },
-    {
-      name: '3-Year Plan',
-      description: 'Ultimate savings for dedicated fans',
-      price: 599.00,
-      period: '3year',
-      features: ['1 coffee per day', 'Biggest savings', 'All perks included', 'VIP support', 'Exclusive merchandise'],
-      coupon_per_day: 2,
+      is_hidden: false,
     },
   ]
 
   for (const tier of subscriptionTiers) {
-    // Check if exists
     const { data: existing } = await supabase
       .from('subscription_tiers')
       .select('id')
-      .eq('name', tier.name)
-      .single()
+      .eq('period', tier.period)
+      .maybeSingle()
 
     if (existing) {
-      console.log(`  - ${tier.name} already exists, skipping`)
+      const { error: updErr } = await supabase
+        .from('subscription_tiers')
+        .update({ ...tier, updated_at: new Date().toISOString() })
+        .eq('id', existing.id)
+      if (updErr) {
+        console.error(`Failed to update tier ${tier.name}:`, updErr.message)
+      } else {
+        console.log(`  - ${tier.name} updated`)
+      }
       continue
     }
 
-    const { error } = await supabase
-      .from('subscription_tiers')
-      .insert(tier)
+    const { error } = await supabase.from('subscription_tiers').insert(tier)
 
     if (error) {
       console.error(`Failed to seed tier ${tier.name}:`, error.message)
@@ -74,6 +99,12 @@ async function seedData() {
       console.log(`  - ${tier.name} seeded`)
     }
   }
+
+  // Hide legacy 3-year / old annual names
+  await supabase
+    .from('subscription_tiers')
+    .update({ is_hidden: true })
+    .or('name.ilike.%3-year%,name.ilike.%3 year%,name.ilike.%legacy%')
 
   // Seed Products (Coffee Drinks) — kiosk menu: hot / iced variants with fixed prices
   console.log('\nSeeding products...')
@@ -199,80 +230,19 @@ async function seedData() {
 
   console.log(`  - Active drink menu: ${productNames.join(', ')}`)
 
-  // Seed Add-ons (kiosk menu: Oat Milk, Espresso, Flavors)
-  console.log('\nSeeding add-ons...')
-  const addOns = [
-    {
-      name: 'Oat Milk',
-      description: 'Substitute with oat milk',
-      price: 0.7,
-      temperature: 'both' as const,
-      is_hidden: false,
-    },
-    {
-      name: 'Espresso',
-      description: 'Extra espresso shot',
-      price: 1.0,
-      temperature: 'both' as const,
-      is_hidden: false,
-    },
-    {
-      name: 'Flavors',
-      description: 'Syrup or flavor add-on',
-      price: 0.5,
-      temperature: 'both' as const,
-      is_hidden: false,
-    },
-  ]
-  const addOnNames = addOns.map((addon) => addon.name)
-
+  // Add-ons come from CofePlus catalog sync — do not seed a fake list.
+  // Hide any legacy manual add-ons.
+  console.log('\nHiding legacy seeded add-ons (use CofePlus Sync instead)...')
   const { error: hideAddOnsError } = await supabase
     .from('add_ons')
     .update({ is_hidden: true, updated_at: new Date().toISOString() })
-    .not('id', 'is', null)
+    .in('name', ['Oat Milk', 'Espresso', 'Flavors'])
 
   if (hideAddOnsError) {
-    console.error('Failed to hide existing add-ons:', hideAddOnsError.message)
+    console.error('Failed to hide legacy add-ons:', hideAddOnsError.message)
+  } else {
+    console.log('  - Legacy Oat Milk / Espresso / Flavors hidden')
   }
-
-  for (const addon of addOns) {
-    const { data: existingAddOns, error: lookupError } = await supabase
-      .from('add_ons')
-      .select('id')
-      .eq('name', addon.name)
-
-    if (lookupError) {
-      console.error(`Failed to check add-on ${addon.name}:`, lookupError.message)
-      continue
-    }
-
-    const existingAddOn = existingAddOns?.[0]
-
-    if (existingAddOn) {
-      const { error: updErr } = await supabase
-        .from('add_ons')
-        .update({ ...addon, updated_at: new Date().toISOString() })
-        .eq('id', existingAddOn.id)
-      if (updErr) {
-        console.error(`  - ${addon.name}: could not update price:`, updErr.message)
-      } else {
-        console.log(`  - ${addon.name} price/description updated`)
-      }
-      continue
-    }
-
-    const { error } = await supabase
-      .from('add_ons')
-      .insert(addon)
-
-    if (error) {
-      console.error(`Failed to seed add-on ${addon.name}:`, error.message)
-    } else {
-      console.log(`  - ${addon.name} seeded`)
-    }
-  }
-
-  console.log(`  - Active add-ons: ${addOnNames.join(', ')}`)
 
   // Seed Kiosks
   console.log('\nSeeding kiosks...')

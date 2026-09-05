@@ -17,6 +17,12 @@ import {
   formatWaitLabel,
   TEST_DISPENSE_SECONDS,
 } from '@/lib/cofeplus/timing'
+import { getProductLogicSettings } from '@/lib/product-logic/settings'
+import {
+  commitRedemption,
+  releaseRedemption,
+} from '@/lib/product-logic/redemptions'
+import { activateReferralOnFirstDrink } from '@/lib/product-logic/referrals'
 
 /** Orders that currently occupy the physical machine / dispenser */
 const MACHINE_BUSY_STATUSES = ['pending', 'brewing', 'ready'] as const
@@ -25,7 +31,7 @@ const MACHINE_BUSY_STATUSES = ['pending', 'brewing', 'ready'] as const
 const QUEUE_WAITING_STATUSES = ['queued'] as const
 
 const ORDER_SELECT =
-  'id, status, pickup_code, cofeplus_dispatch_id, cofeplus_pod_id, cofeplus_environment, machine_activated_at, created_at, order_number, user_id, kiosk_id, delivery_port'
+  'id, status, pickup_code, cofeplus_dispatch_id, cofeplus_pod_id, cofeplus_environment, machine_activated_at, scan_expires_at, created_at, order_number, user_id, kiosk_id, delivery_port, redemption_id'
 
 /** Physical dispense holes on a Kafei machine */
 export const DISPENSE_PORTS = [1, 2] as const
@@ -42,11 +48,13 @@ export type MachineOrderRow = {
   cofeplus_pod_id: string | null
   cofeplus_environment: string | null
   machine_activated_at?: string | null
+  scan_expires_at?: string | null
   created_at: string
   order_number?: string
   user_id?: string
   kiosk_id?: string
   delivery_port?: number | null
+  redemption_id?: string | null
 }
 
 export interface QueueSnapshot {
@@ -258,7 +266,7 @@ async function loadOrderItemForDispatch(
 } | null> {
   const { data, error } = await adminClient
     .from('order_items')
-    .select('product_id, products(name, temperature, cofeplus_item_code)')
+    .select('product_id, addons, products(name, temperature, cofeplus_item_code)')
     .eq('order_id', orderId)
     .limit(1)
     .maybeSingle()
@@ -279,6 +287,35 @@ async function loadOrderItemForDispatch(
     displayNote,
     product?.temperature
   )
+
+  // Merge selected Kafei add-ons → CofePlus modifier group/flag
+  const rawAddons = data?.addons
+  let addonIds: string[] = []
+  if (Array.isArray(rawAddons)) {
+    addonIds = rawAddons.filter((id): id is string => typeof id === 'string')
+  } else if (typeof rawAddons === 'string') {
+    try {
+      const parsed = JSON.parse(rawAddons)
+      if (Array.isArray(parsed)) {
+        addonIds = parsed.filter((id): id is string => typeof id === 'string')
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  if (addonIds.length > 0) {
+    const { data: addonRows } = await adminClient
+      .from('add_ons')
+      .select('id, cofeplus_group, cofeplus_flag, cofeplus_locator')
+      .in('id', addonIds)
+
+    for (const addon of addonRows || []) {
+      if (addon.cofeplus_group && addon.cofeplus_flag) {
+        modifierPreferences[addon.cofeplus_group] = addon.cofeplus_flag
+      }
+    }
+  }
 
   if (!itemCode && product?.name) {
     let menuQuery = adminClient
@@ -365,6 +402,18 @@ export async function persistPickupForOrder(
     cofeplus_environment: environment,
     machine_activated_at: new Date().toISOString(),
     delivery_port: port,
+  }
+
+  try {
+    const settings = await getProductLogicSettings(adminClient)
+    const scanSeconds = settings.scan_window_seconds || 80
+    activationFields.scan_expires_at = new Date(
+      Date.now() + scanSeconds * 1000
+    ).toISOString()
+  } catch {
+    activationFields.scan_expires_at = new Date(
+      Date.now() + 80_000
+    ).toISOString()
   }
 
   let activatedResult = await adminClient
@@ -606,7 +655,89 @@ async function maybeCompleteTestDispense(
     return order
   }
 
+  await onOrderCompleted(adminClient, completed as MachineOrderRow)
   return completed as MachineOrderRow
+}
+
+/**
+ * If the user was called but never scanned within the scan window,
+ * clear pickup and push them to the end of the queue (no wallet penalty).
+ */
+async function maybeExpireMissedScan(
+  adminClient: SupabaseClient,
+  order: MachineOrderRow
+): Promise<MachineOrderRow> {
+  if (order.status !== 'pending') return order
+  if (!order.pickup_code || !order.machine_activated_at) return order
+
+  // Once CofePlus has accepted/making, do not expire
+  if (order.cofeplus_dispatch_id && !isSimulatedDispatchId(order.cofeplus_dispatch_id)) {
+    // Only expire if still pending and window passed — brewing/ready means scanned
+  }
+
+  const expiresAt = order.scan_expires_at
+    ? new Date(order.scan_expires_at).getTime()
+    : null
+
+  let deadline = expiresAt
+  if (!deadline) {
+    try {
+      const settings = await getProductLogicSettings(adminClient)
+      deadline =
+        new Date(order.machine_activated_at).getTime() +
+        (settings.scan_window_seconds || 80) * 1000
+    } catch {
+      deadline =
+        new Date(order.machine_activated_at).getTime() + 80_000
+    }
+  }
+
+  if (Date.now() < deadline) {
+    return order
+  }
+
+  console.log(
+    `[queue] scan window missed order=${order.id} — bumping to end of queue`
+  )
+
+  // Release entitlement hold? Spec: balances unchanged — keep hold, requeue order
+  const { data: bumped } = await adminClient
+    .from('orders')
+    .update({
+      status: 'queued',
+      pickup_code: null,
+      cofeplus_dispatch_id: null,
+      machine_activated_at: null,
+      scan_expires_at: null,
+      delivery_port: null,
+      // Bump to end of line by refreshing created_at? Use a bump timestamp via updated_at
+      // FIFO uses created_at — append by setting created_at to now so they go last
+      created_at: new Date().toISOString(),
+    })
+    .eq('id', order.id)
+    .eq('status', 'pending')
+    .select(ORDER_SELECT)
+    .maybeSingle()
+
+  return (bumped as MachineOrderRow) || order
+}
+
+async function onOrderCompleted(
+  adminClient: SupabaseClient,
+  order: MachineOrderRow
+) {
+  try {
+    await commitRedemption(adminClient, order.id)
+  } catch (err) {
+    console.error('[queue] commitRedemption failed', err)
+  }
+  if (order.user_id) {
+    try {
+      await activateReferralOnFirstDrink(adminClient, order.user_id)
+    } catch (err) {
+      console.error('[queue] referral activation failed', err)
+    }
+  }
 }
 
 /**
@@ -623,7 +754,12 @@ export async function syncBusyOrderAndAdvanceQueue(
   }
 
   const environment = asEnvironment(order.cofeplus_environment)
-  let current = order
+  let current = await maybeExpireMissedScan(adminClient, order)
+
+  if (current.status === 'queued') {
+    await tryActivateNextQueuedOrder(adminClient, podId, environment)
+    return current
+  }
 
   if (
     current.cofeplus_dispatch_id &&
@@ -671,9 +807,17 @@ export async function syncBusyOrderAndAdvanceQueue(
     }
   }
 
-  const stillBusy = MACHINE_BUSY_STATUSES.includes(
-    current.status as (typeof MACHINE_BUSY_STATUSES)[number]
-  )
+  if (current.status === 'completed') {
+    await onOrderCompleted(adminClient, current)
+  }
+
+  if (current.status === 'cancelled') {
+    try {
+      await releaseRedemption(adminClient, current.id)
+    } catch (err) {
+      console.error('[queue] releaseRedemption failed', err)
+    }
+  }
 
   await tryActivateNextQueuedOrder(adminClient, podId, environment)
 

@@ -4,13 +4,6 @@ import { useState } from 'react'
 import { updateOrderStatus } from '@/app/actions/orders'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 
 export function EditOrderForm({ order }: { order: any }) {
   const [error, setError] = useState<string | null>(null)
@@ -40,19 +33,19 @@ export function EditOrderForm({ order }: { order: any }) {
       )}
       <div className="space-y-2">
         <Label htmlFor="status">Order Status</Label>
-        <Select value={status} onValueChange={setStatus}>
-          <SelectTrigger>
-            <SelectValue placeholder="Select status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="queued">Queued</SelectItem>
-            <SelectItem value="pending">Pending (QR ready)</SelectItem>
-            <SelectItem value="brewing">Brewing</SelectItem>
-            <SelectItem value="ready">Ready</SelectItem>
-            <SelectItem value="completed">Completed</SelectItem>
-            <SelectItem value="cancelled">Cancelled</SelectItem>
-          </SelectContent>
-        </Select>
+        <select
+          id="status"
+          value={status}
+          onChange={(event) => setStatus(event.target.value)}
+          className="border-input bg-background h-9 w-full rounded-md border px-3 text-sm"
+        >
+          <option value="queued">Queued</option>
+          <option value="pending">Pending (QR ready)</option>
+          <option value="brewing">Brewing</option>
+          <option value="ready">Ready</option>
+          <option value="completed">Completed</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
       </div>
       <Button
         type="button"

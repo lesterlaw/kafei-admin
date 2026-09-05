@@ -110,6 +110,16 @@ const navItems = [
         icon: Gift,
       },
       {
+        title: 'Referrals',
+        url: '/dashboard/referrals',
+        icon: Users,
+      },
+      {
+        title: 'Product Logic',
+        url: '/dashboard/product-logic',
+        icon: Settings,
+      },
+      {
         title: 'Daily Coupons',
         url: '/dashboard/coupons',
         icon: Ticket,

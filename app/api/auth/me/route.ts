@@ -52,23 +52,21 @@ export async function PUT(request: NextRequest) {
       updateData.email = email
     }
 
-    // Handle referral code if provided
     if (referral_code_used) {
-      // Find the user who owns this referral code
-      const { data: referrer } = await adminClient
-        .from('users')
-        .select('id')
-        .eq('referral_code', referral_code_used)
-        .single()
-
-      if (referrer) {
-        // Create referral record
-        await adminClient.from('referrals').insert({
-          referrer_id: referrer.id,
-          referred_id: user.id,
-          referral_code: referral_code_used,
-        })
+      try {
+        const { recordReferralAtSignup } = await import('@/lib/product-logic')
+        await recordReferralAtSignup(adminClient, user.id, String(referral_code_used))
+      } catch (err) {
+        console.error('[auth/me] referral record failed', err)
       }
+    }
+
+    // Grant welcome drink + beans on first profile completion
+    try {
+      const { grantWelcomeIfNeeded } = await import('@/lib/product-logic')
+      await grantWelcomeIfNeeded(adminClient, user.id)
+    } catch (err) {
+      console.error('[auth/me] welcome grant failed', err)
     }
 
     // Update user profile

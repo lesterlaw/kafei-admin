@@ -326,6 +326,107 @@ async function upsertProductsFromItems(
   return upserted
 }
 
+const SKIP_ADDON_GROUPS = new Set([
+  'temperature',
+  'cup-size',
+  'cupSize',
+  'cup_size',
+  'size',
+])
+
+/**
+ * Upsert paid customer modifiers from CofePlus into Kafei add_ons.
+ * Skips machine-required groups (temperature, cup size).
+ */
+async function upsertAddOnsFromItems(
+  adminClient: SupabaseClient,
+  items: PodItemOption[]
+) {
+  const seen = new Map<
+    string,
+    { group: string; flag: string; name: string; price: number; locator?: string }
+  >()
+
+  for (const item of items) {
+    const groups = item.modifierGroups || []
+    for (const group of groups) {
+      const groupKey = String(group.group || '').toLowerCase()
+      if (SKIP_ADDON_GROUPS.has(group.group) || SKIP_ADDON_GROUPS.has(groupKey)) {
+        continue
+      }
+      for (const option of group.options || []) {
+        if (!option.flag || option.flag === 'none') continue
+        // Skip empty latte-art placeholders that need upload
+        if (
+          groupKey.includes('latte') &&
+          (option.flag === 'catalog' || option.flag === 'upload')
+        ) {
+          continue
+        }
+        const key = `${group.group}::${option.flag}`
+        if (seen.has(key)) continue
+        const price =
+          typeof option.price === 'number'
+            ? option.price
+            : Number(option.price) || 0
+        const name =
+          option.display ||
+          `${group.display || group.group}: ${option.flag}`
+        seen.set(key, {
+          group: group.group,
+          flag: option.flag,
+          name: String(name),
+          price,
+          locator: undefined,
+        })
+      }
+    }
+  }
+
+  let upserted = 0
+  for (const addon of seen.values()) {
+    const { data: existing } = await adminClient
+      .from('add_ons')
+      .select('id')
+      .eq('cofeplus_group', addon.group)
+      .eq('cofeplus_flag', addon.flag)
+      .maybeSingle()
+
+    const payload = {
+      name: addon.name,
+      description: `${addon.group} / ${addon.flag}`,
+      price: addon.price,
+      temperature: 'both' as const,
+      is_hidden: false,
+      cofeplus_group: addon.group,
+      cofeplus_flag: addon.flag,
+      cofeplus_locator: addon.locator || null,
+      source: 'cofeplus',
+      updated_at: new Date().toISOString(),
+    }
+
+    if (existing) {
+      const { error } = await adminClient
+        .from('add_ons')
+        .update(payload)
+        .eq('id', existing.id)
+      if (!error) upserted += 1
+    } else {
+      const { error } = await adminClient.from('add_ons').insert(payload)
+      if (!error) upserted += 1
+    }
+  }
+
+  // Hide legacy manual seed add-ons
+  await adminClient
+    .from('add_ons')
+    .update({ is_hidden: true, updated_at: new Date().toISOString() })
+    .eq('source', 'manual')
+    .in('name', ['Oat Milk', 'Espresso', 'Flavors'])
+
+  return upserted
+}
+
 /**
  * Pull pods + menu from CofePlus, cache them, and optionally map into
  * Kafei kiosks (pod_id) + products (cofeplus_item_code) for mobile orders.
@@ -405,6 +506,11 @@ export async function syncCofeplusCatalog(
         targetPods.length > 0 ? targetPods : pods
       )
       productsUpserted = await upsertProductsFromItems(adminClient, allItems)
+      try {
+        await upsertAddOnsFromItems(adminClient, allItems)
+      } catch (err) {
+        console.warn('[cofeplus-sync] add-on upsert failed', err)
+      }
     }
 
     await adminClient.from('cofeplus_sync_runs').insert({

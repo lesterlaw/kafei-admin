@@ -1,11 +1,11 @@
 'use client'
 
 import { ColumnDef } from '@tanstack/react-table'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Pencil, Trash2 } from 'lucide-react'
 import Link from 'next/link'
-import { deleteOrder, updateOrderStatus } from '@/app/actions/orders'
+import { deleteOrder } from '@/app/actions/orders'
+import { OrderStatusSelect } from './order-status-select'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -34,7 +34,12 @@ const OrderActions = ({ order }: { order: any }) => {
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div
+      className="flex items-center gap-2"
+      data-no-row-nav
+      onClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
+    >
       <Dialog>
         <DialogTrigger asChild>
           <Button variant="outline" size="sm">
@@ -105,22 +110,9 @@ export const orderColumns: ColumnDef<any>[] = [
     accessorKey: 'status',
     header: 'Status',
     cell: ({ row }) => {
-      const status = String(row.getValue('status') || '')
-      if (!status) {
-        return <span className="text-muted-foreground">—</span>
-      }
+      const status = String(row.getValue('status') || 'pending')
       return (
-        <Badge
-          variant={
-            status === 'completed'
-              ? 'default'
-              : status === 'cancelled'
-                ? 'destructive'
-                : 'secondary'
-          }
-        >
-          {status.replace('_', ' ')}
-        </Badge>
+        <OrderStatusSelect orderId={row.original.id} status={status} />
       )
     },
   },

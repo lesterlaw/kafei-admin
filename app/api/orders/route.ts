@@ -11,6 +11,13 @@ import {
   syntheticPodIdForKiosk,
   type MachineOrderRow,
 } from '@/lib/cofeplus/queue'
+import {
+  isSecondCupEligible,
+  attachOrderToRedemption,
+  isLatteOrAmericano,
+  takeUnusedAddonCoupon,
+  WELCOME_PROMO_CODE,
+} from '@/lib/product-logic'
 
 const uuidSchema = z.string().uuid()
 
@@ -26,6 +33,15 @@ const createOrderSchema = z.object({
 
     return uuidSchema.safeParse(value).success ? value : undefined
   }, uuidSchema.optional()),
+  redemption_id: z.preprocess((value) => {
+    if (typeof value !== 'string' || value.trim() === '') {
+      return undefined
+    }
+    return uuidSchema.safeParse(value).success ? value : undefined
+  }, uuidSchema.optional()),
+  entitlement: z
+    .enum(['daily_coupon', 'second_cup', 'welcome', 'stamp', 'bean_drink', 'cash'])
+    .optional(),
   cofeplus_environment: z.enum(['test', 'live']).optional(),
 })
 
@@ -90,7 +106,7 @@ export async function POST(request: NextRequest) {
       return createApiError('Invalid order payload', 400)
     }
 
-    const { kiosk_id, product_id, addons, coupon_id } =
+    const { kiosk_id, product_id, addons, coupon_id, redemption_id, entitlement } =
       validationResult.data
     const adminClient = getAdminClient()
     const environment = resolveCofeplusEnvironment(
@@ -130,7 +146,9 @@ export async function POST(request: NextRequest) {
       return createApiError('Kiosk not found', 404)
     }
 
-    let total = Number(product.price)
+    const drinkPrice = Number(product.price)
+    let addonTotal = 0
+    let entitlementType: string | null = entitlement || null
 
     if (addons && addons.length > 0) {
       const { data: addonData } = await adminClient
@@ -139,16 +157,61 @@ export async function POST(request: NextRequest) {
         .in('id', addons)
 
       if (addonData) {
-        total += addonData.reduce((sum, addon) => sum + Number(addon.price), 0)
+        addonTotal = addonData.reduce((sum, addon) => sum + Number(addon.price), 0)
       }
     }
 
+    let total = drinkPrice + addonTotal
+
+    // Free reward / bean redemptions: zero the drink, keep add-on cash unless covered
+    if (redemption_id) {
+      const { data: redemption } = await adminClient
+        .from('redemptions')
+        .select('*')
+        .eq('id', redemption_id)
+        .eq('user_id', user.id)
+        .in('status', ['held', 'queued'])
+        .maybeSingle()
+
+      if (!redemption) {
+        return createApiError('Redemption hold not found', 400)
+      }
+
+      if (
+        ['welcome', 'stamp', 'bean_drink', 'daily_coupon', 'pass_coupon'].includes(
+          redemption.type
+        )
+      ) {
+        total = addonTotal
+        entitlementType = redemption.type
+        if (redemption.type === 'welcome') {
+          if (!isLatteOrAmericano(product.name || '')) {
+            return createApiError('Welcome drink must be Latte or Americano', 400)
+          }
+        }
+      } else if (redemption.type === 'bean_addon') {
+        entitlementType = 'bean_addon'
+        total = drinkPrice
+      } else if (redemption.type === 'second_cup') {
+        total = Math.round(drinkPrice * 50) / 100 + addonTotal
+        entitlementType = 'second_cup'
+      }
+    } else if (entitlement === 'second_cup') {
+      const secondCup = await isSecondCupEligible(adminClient, user.id)
+      if (!secondCup) {
+        return createApiError('Second cup 50% off is not available right now', 400)
+      }
+      total = Math.round(drinkPrice * 50) / 100 + addonTotal
+      entitlementType = 'second_cup'
+    }
+
     let validatedCouponId: string | null = null
+    let appliedAddonCouponId: string | null = null
 
     if (coupon_id) {
       const { data: coupon } = await adminClient
         .from('coupons')
-        .select('id, expires_at, is_redeemed')
+        .select('id, expires_at, is_redeemed, kind')
         .eq('id', coupon_id)
         .eq('user_id', user.id)
         .maybeSingle()
@@ -162,7 +225,22 @@ export async function POST(request: NextRequest) {
           return createApiError('Coupon has expired', 400)
         }
 
-        validatedCouponId = coupon.id
+        const kind = String(coupon.kind || '')
+        if (kind === 'referral_addon') {
+          total = Math.max(0, Math.round((total - addonTotal) * 100) / 100)
+          appliedAddonCouponId = coupon.id
+        } else if (kind === 'welcome' || kind === 'referral_drink') {
+          if (!isLatteOrAmericano(product.name || '')) {
+            return createApiError('This coupon is for Latte or Americano only', 400)
+          }
+          total = Math.max(0, Math.round((total - drinkPrice) * 100) / 100)
+          validatedCouponId = coupon.id
+          entitlementType = entitlementType || kind
+        } else {
+          total = Math.max(0, Math.round((total - drinkPrice) * 100) / 100)
+          validatedCouponId = coupon.id
+          entitlementType = entitlementType || 'daily_coupon'
+        }
       } else {
         const { data: promo } = await adminClient
           .from('promo_codes')
@@ -175,6 +253,10 @@ export async function POST(request: NextRequest) {
           return createApiError('Coupon not found', 404)
         }
 
+        if (promo.type === 'referral' || promo.code === 'REF3FREE') {
+          return createApiError('This promo code is no longer available', 400)
+        }
+
         const now = Date.now()
         if (promo.starts_at && new Date(promo.starts_at).getTime() > now) {
           return createApiError('Promo code is not active yet', 400)
@@ -183,7 +265,7 @@ export async function POST(request: NextRequest) {
           return createApiError('Promo code has expired', 400)
         }
 
-        if (!promo.applies_to_all_users && !promo.is_system) {
+        if (!promo.applies_to_all_users) {
           const { data: assignment } = await adminClient
             .from('promo_code_users')
             .select('promo_code_id')
@@ -196,6 +278,26 @@ export async function POST(request: NextRequest) {
           }
         }
 
+        const isWelcomePromo =
+          promo.code === WELCOME_PROMO_CODE ||
+          String(promo.name || '')
+            .toLowerCase()
+            .includes('welcome drink')
+
+        if (isWelcomePromo) {
+          if (!isLatteOrAmericano(product.name || '')) {
+            return createApiError('Welcome drink must be Latte or Americano', 400)
+          }
+          const { data: wallet } = await adminClient
+            .from('user_wallets')
+            .select('welcome_drink_available')
+            .eq('user_id', user.id)
+            .maybeSingle()
+          if (wallet && wallet.welcome_drink_available === false) {
+            return createApiError('Welcome drink already used', 400)
+          }
+        }
+
         if (promo.min_amount && total < Number(promo.min_amount)) {
           return createApiError('Order does not meet the promo minimum', 400)
         }
@@ -204,17 +306,30 @@ export async function POST(request: NextRequest) {
         if (promo.type === 'fixed') {
           discount = Number(promo.discount_value) || 0
         } else if (promo.type === 'percent') {
+          const base = isWelcomePromo ? drinkPrice : total
           discount =
-            Math.round(total * (Number(promo.discount_value) / 100) * 100) / 100
+            Math.round(base * (Number(promo.discount_value) / 100) * 100) / 100
           if (promo.max_discount_amount != null) {
             discount = Math.min(discount, Number(promo.max_discount_amount))
           }
-        } else if (promo.type === 'referral') {
-          discount = total * (Number(promo.discount_value) || 1)
+        } else if (promo.type === 'nth_cup') {
+          discount =
+            Math.round(total * (Number(promo.discount_value) / 100) * 100) / 100
         }
 
         total = Math.max(0, Math.round((total - discount) * 100) / 100)
         validatedCouponId = promo.id
+        if (isWelcomePromo) {
+          entitlementType = entitlementType || 'welcome'
+        }
+      }
+    }
+
+    if (addonTotal > 0 && addons && addons.length > 0 && !appliedAddonCouponId) {
+      const addonCoupon = await takeUnusedAddonCoupon(adminClient, user.id)
+      if (addonCoupon) {
+        total = Math.max(0, Math.round((total - addonTotal) * 100) / 100)
+        appliedAddonCouponId = addonCoupon.id
       }
     }
 
@@ -300,6 +415,8 @@ export async function POST(request: NextRequest) {
         cofeplus_dispatch_id: null,
         cofeplus_pod_id: cofeplusPodId,
         cofeplus_environment: cofeplusEnv,
+        redemption_id: redemption_id || null,
+        entitlement_type: entitlementType,
       })
       .select('*, kiosks(*)')
       .single()
@@ -310,6 +427,14 @@ export async function POST(request: NextRequest) {
     }
 
     console.log('Order created:', order.id)
+
+    if (redemption_id) {
+      try {
+        await attachOrderToRedemption(adminClient, redemption_id, order.id)
+      } catch (err) {
+        console.error('Failed to attach redemption', err)
+      }
+    }
 
     const { error: itemError } = await adminClient
       .from('order_items')
@@ -325,6 +450,37 @@ export async function POST(request: NextRequest) {
       console.error('Order item creation error:', itemError)
       await adminClient.from('orders').delete().eq('id', order.id)
       return createApiError('Failed to save order items', 500)
+    }
+
+    if (entitlementType === 'welcome') {
+      await adminClient
+        .from('user_wallets')
+        .update({
+          welcome_drink_available: false,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('user_id', user.id)
+    }
+
+    if (appliedAddonCouponId) {
+      await adminClient
+        .from('coupons')
+        .update({
+          is_redeemed: true,
+          redeemed_at: new Date().toISOString(),
+          order_id: order.id,
+        })
+        .eq('id', appliedAddonCouponId)
+        .eq('is_redeemed', false)
+    }
+
+    try {
+      const { activateReferralOnFirstDrink } = await import(
+        '@/lib/product-logic/referrals'
+      )
+      await activateReferralOnFirstDrink(adminClient, user.id)
+    } catch (referralError) {
+      console.error('[orders] referral activation failed', referralError)
     }
 
     let finalOrder = order

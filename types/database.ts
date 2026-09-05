@@ -23,11 +23,153 @@ export interface SubscriptionTier {
   name: string
   description: string
   price: number
-  period: 'monthly' | 'annual' | '3year'
+  period: 'free' | 'monthly' | 'annual' | '3year'
   features: string[]
   coupon_per_day: number
+  is_hidden?: boolean
   created_at: string
   updated_at: string
+}
+
+export interface AddOn {
+  id: string
+  name: string
+  description: string
+  price: number
+  temperature?: 'hot' | 'cold' | 'both'
+  is_hidden: boolean
+  cofeplus_group?: string | null
+  cofeplus_flag?: string | null
+  cofeplus_locator?: string | null
+  source?: 'manual' | 'cofeplus'
+  created_at: string
+  updated_at: string
+}
+
+export interface Coupon {
+  id: string
+  user_id: string
+  code: string
+  qr_code?: string
+  expires_at: string
+  is_redeemed: boolean
+  redeemed_at?: string
+  order_id?: string
+  kind?: 'daily_24h' | 'welcome' | 'pass' | 'other'
+  granted_at?: string
+  created_at: string
+}
+
+export interface Referral {
+  id: string
+  referrer_id: string
+  referred_id: string
+  referral_code: string
+  status?: 'pending' | 'activated_free' | 'activated_paid'
+  activated_at?: string | null
+  reward_issued?: boolean
+  credit_issued?: boolean
+  created_at: string
+}
+
+export interface ProductLogicSettings {
+  stamp_cost: number
+  stamp_max: number
+  checkin_beans: number
+  welcome_beans: number
+  free_bean_expiry_days: number
+  scan_window_seconds: number
+  robot_max_orders: number
+  bean_americano: number
+  bean_latte: number
+  bean_addon: number
+  addon_cash_price: number
+  free_referral_threshold: number
+  free_pass_max: number
+  pass_duration_days: number
+  paid_free_referral_beans: number
+  paid_paid_referral_beans: number
+  paid_referral_credit_threshold: number
+  membership_credit_cents: number
+  paid_referral_drink_coupons?: number
+  paid_referral_addon_coupons?: number
+  paid_referral_coupon_expiry_days?: number
+}
+
+export interface UserWallet {
+  stamp_count: number
+  stamp_cost: number
+  stamp_max: number
+  welcome_drink_available: boolean
+  last_checkin_on: string | null
+  can_checkin: boolean
+  membership_credit_cents: number
+  pass_active_until: string | null
+  pass_pending_until: string | null
+  passes_earned_count: number
+  passes_max: number
+}
+
+export interface WalletResponse {
+  membership: {
+    kind: 'free' | 'monthly' | 'annual' | 'pass'
+    isPaid: boolean
+    isPass: boolean
+    seesAds: boolean
+    collectsStamps: boolean
+    fullBeanCatalogue: boolean
+    freeBeanExpiry: boolean
+    passActiveUntil: string | null
+  }
+  wallet: UserWallet
+  beans: number
+  daily_coupon: Coupon | null
+  second_cup_eligible: boolean
+  reward_catalogue: Array<{
+    id: string
+    type: 'bean_drink' | 'bean_addon'
+    name: string
+    beans: number
+    free_eligible: boolean
+    paid_eligible: boolean
+    cash_price?: number
+  }>
+  settings: {
+    scan_window_seconds: number
+    checkin_beans: number
+    free_bean_expiry_days: number
+  }
+  referral: {
+    free: {
+      activated_count: number
+      threshold: number
+      progress: number
+      passes_earned: number
+      passes_max: number
+      pass_active_until: string | null
+      pass_pending_until: string | null
+    }
+    paid: {
+      activated_free_count: number
+      activated_paid_count: number
+      credit_threshold: number
+      credit_progress: number
+      beans_per_free: number
+      beans_per_paid: number
+      membership_credit_cents: number
+    }
+  }
+}
+
+export interface HouseAd {
+  id: string
+  title: string
+  media_url: string
+  media_type: 'image' | 'video'
+  duration_seconds: number
+  placement: 'checkin' | 'redemption' | 'both'
+  is_active: boolean
+  sort_order: number
 }
 
 export interface UserSubscription {
@@ -68,17 +210,6 @@ export interface Product {
   updated_at: string
 }
 
-export interface AddOn {
-  id: string
-  name: string
-  description: string
-  price: number
-  temperature?: 'hot' | 'cold' | 'both'
-  is_hidden: boolean
-  created_at: string
-  updated_at: string
-}
-
 export interface ProductAddOn {
   product_id: string
   addon_id: string
@@ -98,6 +229,9 @@ export interface Order {
   cofeplus_pod_id?: string | null
   cofeplus_environment?: 'test' | 'live' | null
   delivery_port?: number | null
+  redemption_id?: string | null
+  entitlement_type?: string | null
+  scan_expires_at?: string | null
   created_at: string
   updated_at: string
 }
@@ -109,26 +243,6 @@ export interface OrderItem {
   quantity: number
   price: number
   addons?: string[]
-}
-
-export interface Coupon {
-  id: string
-  user_id: string
-  code: string
-  qr_code?: string
-  expires_at: string
-  is_redeemed: boolean
-  redeemed_at?: string
-  order_id?: string
-  created_at: string
-}
-
-export interface Referral {
-  id: string
-  referrer_id: string
-  referred_id: string
-  referral_code: string
-  created_at: string
 }
 
 export interface Kiosk {
