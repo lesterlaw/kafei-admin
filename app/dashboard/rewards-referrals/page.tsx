@@ -101,21 +101,15 @@ export default async function RewardsReferralsPage() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <p className="text-sm text-muted-foreground">
-                  1 activated Free user +50 Beans. 1 new Paid subscriber +150
-                  Beans. Every 3 Paid referrals: 10 Latte/Americano drink
-                  coupons and 10 add-on coupons (90-day expiry). Repeatable, no
-                  cap for phase 1.
+                  Every 3 new Paid subscribers (Monthly or Annual, same count)
+                  grant 10 Latte/Americano drink coupons and 10 add-on coupons
+                  (extra shot, oat milk, or latte art). Coupons expire after 90
+                  days. Add-on coupons can be used on the daily coupon drink.
+                  Repeatable, no cap for phase 1. Beans are no longer awarded
+                  for referrals.
                 </p>
-                <Field
-                  label="Beans for 1 activated Free user"
-                  name="paid_free_referral_beans"
-                  defaultValue={s.paid_free_referral_beans}
-                />
-                <Field
-                  label="Beans for 1 new Paid subscriber"
-                  name="paid_paid_referral_beans"
-                  defaultValue={s.paid_paid_referral_beans}
-                />
+                <input type="hidden" name="paid_free_referral_beans" value={0} />
+                <input type="hidden" name="paid_paid_referral_beans" value={0} />
                 <Field
                   label="Paid referrals for coupon bundle"
                   name="paid_referral_credit_threshold"

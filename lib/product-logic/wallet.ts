@@ -159,7 +159,7 @@ export async function resolveMembership(
         isPaid: false,
         isPass: true,
         seesAds: false,
-        collectsStamps: false,
+        collectsStamps: true,
         fullBeanCatalogue: true,
         freeBeanExpiry: false,
         subscriptionId: null,

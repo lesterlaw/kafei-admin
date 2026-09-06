@@ -4,7 +4,6 @@ import {
   getProductLogicSettings,
 } from '@/lib/product-logic/settings'
 import {
-  grantBeans,
   resolveMembership,
   ensureWallet,
 } from '@/lib/product-logic/wallet'
@@ -63,15 +62,6 @@ export async function recordReferralAtSignup(
   return data
 }
 
-const FIRST_DRINK_STATUSES = [
-  'completed',
-  'queued',
-  'brewing',
-  'ready',
-  'dispatched',
-  'preparing',
-]
-
 export async function userHasFirstDrink(
   adminClient: SupabaseClient,
   userId: string
@@ -80,11 +70,37 @@ export async function userHasFirstDrink(
     .from('orders')
     .select('id')
     .eq('user_id', userId)
-    .in('status', FIRST_DRINK_STATUSES)
+    .neq('status', 'cancelled')
     .limit(1)
     .maybeSingle()
 
   return Boolean(data)
+}
+
+export async function userHasPaidSubscription(
+  adminClient: SupabaseClient,
+  userId: string
+): Promise<boolean> {
+  const { data } = await adminClient
+    .from('user_subscriptions')
+    .select('id, subscription_tiers(period)')
+    .eq('user_id', userId)
+    .eq('status', 'active')
+    .maybeSingle()
+
+  const tier = data?.subscription_tiers as
+    | { period?: string }
+    | { period?: string }[]
+    | null
+    | undefined
+  const row = Array.isArray(tier) ? tier[0] : tier
+  return row?.period === 'monthly' || row?.period === 'annual'
+}
+
+function cycleProgress(count: number, threshold: number) {
+  if (threshold <= 0 || count <= 0) return 0
+  const remainder = count % threshold
+  return remainder === 0 ? threshold : remainder
 }
 
 /**
@@ -114,6 +130,11 @@ export async function activateReferralOnFirstDrink(
     .eq('id', referral.id)
 
   await issueReferrerRewards(adminClient, referral.referrer_id, 'activated_free')
+
+  if (await userHasPaidSubscription(adminClient, referredUserId)) {
+    await activateReferralOnPaidSubscribe(adminClient, referredUserId)
+  }
+
   return referral
 }
 
@@ -136,6 +157,18 @@ export async function syncReferralActivationForUser(
     for (const row of pendingAsReferrer || []) {
       if (await userHasFirstDrink(adminClient, row.referred_id)) {
         await activateReferralOnFirstDrink(adminClient, row.referred_id)
+      }
+    }
+
+    const { data: freeAsReferrer } = await adminClient
+      .from('referrals')
+      .select('referred_id')
+      .eq('referrer_id', userId)
+      .eq('status', 'activated_free')
+
+    for (const row of freeAsReferrer || []) {
+      if (await userHasPaidSubscription(adminClient, row.referred_id)) {
+        await activateReferralOnPaidSubscribe(adminClient, row.referred_id)
       }
     }
   } catch (error) {
@@ -187,7 +220,7 @@ async function issueReferrerRewards(
   const settings = await getProductLogicSettings(adminClient)
   const { membership } = await resolveMembership(adminClient, referrerId)
 
-  if (membership.kind === 'free') {
+  if (!membership.isPaid) {
     if (event !== 'activated_free') return
 
     const { count } = await adminClient
@@ -203,27 +236,8 @@ async function issueReferrerRewards(
     return
   }
 
-  // Paid referrer
-  if (event === 'activated_free') {
-    await grantBeans(
-      adminClient,
-      referrerId,
-      settings.paid_free_referral_beans,
-      'referral_free',
-      false
-    )
-    return
-  }
-
+  // Paid referrer: coupons only. Beans are no longer awarded for referrals.
   if (event === 'activated_paid') {
-    await grantBeans(
-      adminClient,
-      referrerId,
-      settings.paid_paid_referral_beans,
-      'referral_paid',
-      false
-    )
-
     const { count } = await adminClient
       .from('referrals')
       .select('*', { count: 'exact', head: true })
@@ -314,6 +328,30 @@ export async function grantKafeiPass(
   return { granted: true, pending: false, pass_active_until: until }
 }
 
+async function syncMissedFreePasses(
+  adminClient: SupabaseClient,
+  userId: string,
+  activatedCount: number
+) {
+  const settings = await getProductLogicSettings(adminClient)
+  const { membership, wallet } = await resolveMembership(adminClient, userId)
+  if (membership.isPaid) return wallet
+
+  const deserved = Math.min(
+    Math.floor(activatedCount / settings.free_referral_threshold),
+    settings.free_pass_max
+  )
+
+  let earned = wallet.passes_earned_count
+  while (earned < deserved) {
+    const result = await grantKafeiPass(adminClient, userId)
+    if (!result.granted) break
+    earned += 1
+  }
+
+  return (await resolveMembership(adminClient, userId)).wallet
+}
+
 export async function getReferralProgress(
   adminClient: SupabaseClient,
   userId: string
@@ -321,21 +359,25 @@ export async function getReferralProgress(
   await syncReferralActivationForUser(adminClient, userId)
 
   const settings = await getProductLogicSettings(adminClient)
-  const { membership, wallet } = await resolveMembership(adminClient, userId)
+  const { membership } = await resolveMembership(adminClient, userId)
 
-  const { data: referrals } = await adminClient
+  const { data: referrals, error } = await adminClient
     .from('referrals')
-    .select(
-      '*, referred:users!referrals_referred_id_fkey(id, email, full_name, created_at)'
-    )
+    .select('*')
     .eq('referrer_id', userId)
     .order('created_at', { ascending: false })
+
+  if (error) {
+    console.error('[referrals] progress query failed', error)
+  }
 
   const list = referrals || []
   const activatedFree = list.filter((r) =>
     ['activated_free', 'activated_paid'].includes(r.status)
   ).length
   const activatedPaid = list.filter((r) => r.status === 'activated_paid').length
+
+  const wallet = await syncMissedFreePasses(adminClient, userId, activatedFree)
 
   return {
     referral_code: (
@@ -350,7 +392,7 @@ export async function getReferralProgress(
     free: {
       activated_count: activatedFree,
       threshold: settings.free_referral_threshold,
-      progress: activatedFree % settings.free_referral_threshold,
+      progress: cycleProgress(activatedFree, settings.free_referral_threshold),
       passes_earned: wallet.passes_earned_count,
       passes_max: settings.free_pass_max,
       pass_active_until: wallet.pass_active_until,
@@ -361,9 +403,12 @@ export async function getReferralProgress(
         .length,
       activated_paid_count: activatedPaid,
       credit_threshold: settings.paid_referral_credit_threshold,
-      credit_progress: activatedPaid % settings.paid_referral_credit_threshold,
-      beans_per_free: settings.paid_free_referral_beans,
-      beans_per_paid: settings.paid_paid_referral_beans,
+      credit_progress: cycleProgress(
+        activatedPaid,
+        settings.paid_referral_credit_threshold
+      ),
+      beans_per_free: 0,
+      beans_per_paid: 0,
       membership_credit_cents: wallet.membership_credit_cents,
       drink_coupons: settings.paid_referral_drink_coupons,
       addon_coupons: settings.paid_referral_addon_coupons,

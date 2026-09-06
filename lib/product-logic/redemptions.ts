@@ -72,7 +72,7 @@ export async function createRedemptionHold(
     }
     case 'stamp': {
       if (!membership.collectsStamps) {
-        throw new Error('Stamps are for Free plan only')
+        throw new Error('Stamps are for Free plan and 7-Day Pass only')
       }
       if (wallet.stamp_count < settings.stamp_cost) {
         throw new Error(`Need ${settings.stamp_cost} stamps to redeem`)

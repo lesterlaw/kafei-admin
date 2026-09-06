@@ -100,16 +100,8 @@ export default async function ProductLogicPage() {
                 name="pass_duration_days"
                 defaultValue={s.pass_duration_days}
               />
-              <Field
-                label="Paid→Free Beans"
-                name="paid_free_referral_beans"
-                defaultValue={s.paid_free_referral_beans}
-              />
-              <Field
-                label="Paid→Paid Beans"
-                name="paid_paid_referral_beans"
-                defaultValue={s.paid_paid_referral_beans}
-              />
+              <input type="hidden" name="paid_free_referral_beans" value={0} />
+              <input type="hidden" name="paid_paid_referral_beans" value={0} />
               <Field
                 label="Paid referrals for coupon bundle"
                 name="paid_referral_credit_threshold"
