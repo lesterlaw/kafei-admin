@@ -229,7 +229,7 @@ export async function POST(request: NextRequest) {
         if (kind === 'referral_addon') {
           total = Math.max(0, Math.round((total - addonTotal) * 100) / 100)
           appliedAddonCouponId = coupon.id
-        } else if (kind === 'welcome' || kind === 'referral_drink') {
+        } else if (kind === 'welcome' || kind === 'referral_drink' || kind === 'pass') {
           if (!isLatteOrAmericano(product.name || '')) {
             return createApiError('This coupon is for Latte or Americano only', 400)
           }

@@ -34,7 +34,10 @@ export async function GET(request: NextRequest) {
     const { membership, wallet } = await resolveMembership(adminClient, user.id)
     const beans = await getAvailableBeans(adminClient, user.id).catch(() => 0)
     const dailyCoupon = await getOrCreateDailyCoupon(adminClient, user.id).catch(
-      () => null
+      (error) => {
+        console.error('[wallet] daily coupon', error)
+        return null
+      }
     )
     const secondCup = await isSecondCupEligible(adminClient, user.id).catch(
       () => false

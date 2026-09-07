@@ -8,12 +8,16 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import {
   getUnusedRewardCoupons,
   WELCOME_PROMO_CODE,
+  getOrCreateDailyCoupon,
+  isSecondCupEligible,
 } from '@/lib/product-logic'
 
 function couponTitle(kind: string, code: string) {
   if (kind === 'welcome') return 'Welcome drink - Latte/Americano'
   if (kind === 'referral_drink') return 'Referral drink coupon - Latte/Americano'
   if (kind === 'referral_addon') return 'Referral add-on coupon'
+  if (kind === 'pass') return '7-Day Pass drink - Latte/Americano'
+  if (kind === 'daily_24h') return 'Daily All-Drinks coupon'
   if (code.startsWith('RD-')) return 'Referral drink coupon - Latte/Americano'
   if (code.startsWith('RA-')) return 'Referral add-on coupon'
   return 'Reward coupon'
@@ -75,7 +79,16 @@ export async function GET(request: NextRequest) {
     })
 
     const rewardCoupons = await getUnusedRewardCoupons(supabase, user.id)
-    const asPromos = rewardCoupons.map((coupon) => ({
+    const asPromos: Array<{
+      id: string
+      name: string
+      code: string
+      type: 'percent' | 'fixed'
+      discount_value: number
+      is_system: boolean
+      is_active: boolean
+      kind: string
+    }> = rewardCoupons.map((coupon) => ({
       id: coupon.id,
       name: couponTitle(String(coupon.kind || ''), coupon.code),
       code: coupon.code,
@@ -83,8 +96,42 @@ export async function GET(request: NextRequest) {
       discount_value: coupon.kind === 'referral_addon' ? 1 : 100,
       is_system: true,
       is_active: true,
-      kind: coupon.kind,
+      kind: String(coupon.kind || 'other'),
     }))
+
+    const dailyCoupon = await getOrCreateDailyCoupon(supabase, user.id).catch(
+      (error) => {
+        console.error('[promo-codes] daily coupon', error)
+        return null
+      }
+    )
+    const secondCupEligible = await isSecondCupEligible(supabase, user.id).catch(
+      () => false
+    )
+
+    if (dailyCoupon) {
+      asPromos.unshift({
+        id: dailyCoupon.id,
+        name: couponTitle(String(dailyCoupon.kind || ''), dailyCoupon.code),
+        code: dailyCoupon.code,
+        type: 'percent',
+        discount_value: 100,
+        is_system: true,
+        is_active: true,
+        kind: String(dailyCoupon.kind || 'daily_24h'),
+      })
+    } else if (secondCupEligible) {
+      asPromos.unshift({
+        id: 'second-cup',
+        name: 'Second drink 50% off',
+        code: 'SECOND50',
+        type: 'percent',
+        discount_value: 50,
+        is_system: true,
+        is_active: true,
+        kind: 'second_cup',
+      })
+    }
 
     return createApiResponse([...asPromos, ...applicable])
   } catch (error: any) {
