@@ -1,4 +1,5 @@
 import { COFEPLUS_DEFAULT_BASE_URL } from './config'
+import { getCofeplusConnectIp, requestViaConnectIp } from './connect-override'
 import { logCofeplusRequest, logCofeplusResponse } from './logger'
 
 export interface CofeplusRequestOptions {
@@ -105,30 +106,45 @@ export async function callCofeplusApi(
 
   try {
     const timeoutMs =
-      options.timeoutMs && options.timeoutMs > 0 ? options.timeoutMs : 30_000
+      options.timeoutMs && options.timeoutMs > 0 ? options.timeoutMs : 10_000
 
-    let dispatcher: unknown
-    try {
-      const loadUndici = new Function(
-        'return import("node:undici")'
-      ) as () => Promise<{ Agent: new (opts: Record<string, unknown>) => unknown }>
-      const { Agent } = await loadUndici()
-      dispatcher = new Agent({
-        connectTimeout: timeoutMs,
-        headersTimeout: timeoutMs,
-        bodyTimeout: timeoutMs,
-        connect: { timeout: timeoutMs },
+    const connectIp = getCofeplusConnectIp(requestUrl)
+    let status: number
+    let statusText: string
+    let body: string
+    const responseHeaders: Record<string, string> = {}
+
+    if (connectIp) {
+      const pinned = await requestViaConnectIp(requestUrl, connectIp, {
+        method,
+        headers,
+        body: options.body,
+        timeoutMs,
       })
-    } catch {
-      dispatcher = undefined
-    }
+      status = pinned.status
+      statusText = pinned.statusText
+      body = pinned.body
+      Object.assign(responseHeaders, pinned.headers)
+    } else {
+      let dispatcher: unknown
+      try {
+        const loadUndici = new Function(
+          'return import("node:undici")'
+        ) as () => Promise<{ Agent: new (opts: Record<string, unknown>) => unknown }>
+        const { Agent } = await loadUndici()
+        dispatcher = new Agent({
+          connectTimeout: timeoutMs,
+          headersTimeout: timeoutMs,
+          bodyTimeout: timeoutMs,
+          connect: { timeout: timeoutMs },
+        })
+      } catch {
+        dispatcher = undefined
+      }
 
-    let response: Response | undefined
-    let lastError: unknown
-    const attempts = 3
-    for (let attempt = 1; attempt <= attempts; attempt += 1) {
       const controller = new AbortController()
       const timer = setTimeout(() => controller.abort(), timeoutMs)
+      let response: Response
       try {
         response = await fetch(requestUrl, {
           method,
@@ -138,34 +154,22 @@ export async function callCofeplusApi(
           signal: controller.signal,
           ...(dispatcher ? { dispatcher } : {}),
         } as RequestInit)
-        lastError = null
-        break
-      } catch (err) {
-        lastError = err
-        if (attempt === attempts) throw err
-        await new Promise((resolve) => setTimeout(resolve, 500 * attempt))
       } finally {
         clearTimeout(timer)
       }
-    }
-
-    if (!response) {
-      throw lastError instanceof Error
-        ? lastError
-        : new Error('Network request failed')
+      status = response.status
+      statusText = response.statusText
+      body = await response.text()
+      response.headers.forEach((value, key) => {
+        responseHeaders[key] = value
+      })
     }
     const durationMs = Date.now() - startedAt
-    const body = await response.text()
-
-    const responseHeaders: Record<string, string> = {}
-    response.headers.forEach((value, key) => {
-      responseHeaders[key] = value
-    })
 
     const result: CofeplusResponse = {
-      ok: response.ok,
-      status: response.status,
-      statusText: response.statusText,
+      ok: status >= 200 && status < 300,
+      status,
+      statusText,
       headers: responseHeaders,
       body,
       durationMs,
@@ -223,6 +227,7 @@ export async function callCofeplusApi(
         url: requestUrl,
         durationMs,
         cause,
+        connectIp: getCofeplusConnectIp(requestUrl),
       })
       logCofeplusResponse({
         environment: options.environment,
