@@ -232,6 +232,7 @@ export interface Order {
   redemption_id?: string | null
   entitlement_type?: string | null
   scan_expires_at?: string | null
+  missed_scans?: number | null
   created_at: string
   updated_at: string
 }
@@ -259,6 +260,9 @@ export interface Kiosk {
   pod_id?: string | null
   created_at: string
   updated_at: string
+  has_device_token?: boolean
+  device_token?: string | null
+  device_last_seen_at?: string | null
 }
 
 export interface SupportTicket {

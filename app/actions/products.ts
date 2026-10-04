@@ -205,7 +205,7 @@ export async function getAddOns() {
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from('add_ons')
-    .select('*')
+    .select('*, product_addons(product_id)')
     .order('created_at', { ascending: false })
 
   if (error) {
@@ -213,6 +213,22 @@ export async function getAddOns() {
   }
 
   return data || []
+}
+
+export async function getAddOnById(id: string) {
+  await verifyAdmin()
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from('add_ons')
+    .select('*, product_addons(product_id)')
+    .eq('id', id)
+    .single()
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  return data
 }
 
 export async function createAddOn(formData: FormData) {
@@ -225,19 +241,41 @@ export async function createAddOn(formData: FormData) {
   const temperature = formData.get('temperature') as 'hot' | 'cold' | 'both' | null
   const isHidden = formData.get('is_hidden') === 'true'
 
-  const { error } = await supabase.from('add_ons').insert({
-    name,
-    description,
-    price,
-    temperature: temperature || null,
-    is_hidden: isHidden,
-  })
+  const { data: created, error } = await supabase
+    .from('add_ons')
+    .insert({
+      name,
+      description,
+      price,
+      temperature: temperature || null,
+      is_hidden: isHidden,
+      source: 'manual',
+    })
+    .select('id')
+    .single()
 
   if (error) {
     return { error: error.message }
   }
 
+  const productIds = formData.getAll('product_ids').filter(
+    (value): value is string => typeof value === 'string' && value.length > 0
+  )
+  if (created?.id) {
+    try {
+      await replaceProductAddOns(supabase, created.id, productIds)
+    } catch (linkError) {
+      return {
+        error:
+          linkError instanceof Error
+            ? linkError.message
+            : 'Add-on saved but product tags failed',
+      }
+    }
+  }
+
   revalidatePath('/dashboard/products/add-ons')
+  revalidatePath('/dashboard/products')
   return { success: true }
 }
 
@@ -266,7 +304,23 @@ export async function updateAddOn(id: string, formData: FormData) {
     return { error: error.message }
   }
 
+  const productIds = formData.getAll('product_ids').filter(
+    (value): value is string => typeof value === 'string' && value.length > 0
+  )
+  try {
+    await replaceProductAddOns(supabase, id, productIds)
+  } catch (linkError) {
+    return {
+      error:
+        linkError instanceof Error
+          ? linkError.message
+          : 'Add-on saved but product tags failed',
+    }
+  }
+
   revalidatePath('/dashboard/products/add-ons')
+  revalidatePath(`/dashboard/products/add-ons/${id}`)
+  revalidatePath('/dashboard/products')
   return { success: true }
 }
 
@@ -280,9 +334,28 @@ export async function deleteAddOn(id: string) {
   }
 
   revalidatePath('/dashboard/products/add-ons')
+  revalidatePath('/dashboard/products')
   return { success: true }
 }
 
-
-
+async function replaceProductAddOns(
+  supabase: ReturnType<typeof createAdminClient>,
+  addonId: string,
+  productIds: string[]
+) {
+  await supabase.from('product_addons').delete().eq('addon_id', addonId)
+  const unique = [...new Set(productIds)]
+  if (unique.length === 0) {
+    return
+  }
+  const { error } = await supabase.from('product_addons').insert(
+    unique.map((productId) => ({
+      product_id: productId,
+      addon_id: addonId,
+    }))
+  )
+  if (error) {
+    throw new Error(error.message)
+  }
+}
 

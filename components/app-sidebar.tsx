@@ -80,7 +80,7 @@ const navItems = [
         icon: ShoppingCart,
       },
       {
-        title: 'Queue',
+        title: 'Live queue',
         url: '/dashboard/queue',
         icon: ListOrdered,
       },

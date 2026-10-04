@@ -25,6 +25,7 @@ export default async function SupportPage() {
         columns={ticketColumns}
         data={tickets}
         searchKey="subject"
+        exportFilename="support-tickets"
         rowHrefBase="/dashboard/support"
       />
     </div>

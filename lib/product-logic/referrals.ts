@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
-  addDaysIso,
+  addInclusiveSingaporeDaysEndIso,
   getProductLogicSettings,
 } from '@/lib/product-logic/settings'
 import {
@@ -11,6 +11,15 @@ import { grantReferralRewardCoupons } from '@/lib/product-logic/coupons'
 
 export function normalizeReferralCode(value: string): string {
   return value.trim().toUpperCase()
+}
+
+export class InvalidReferralCodeError extends Error {
+  readonly code = 'INVALID_REFERRAL'
+
+  constructor(message = 'This referral code is not valid') {
+    super(message)
+    this.name = 'InvalidReferralCodeError'
+  }
 }
 
 export async function recordReferralAtSignup(
@@ -27,8 +36,12 @@ export async function recordReferralAtSignup(
     .ilike('referral_code', code)
     .maybeSingle()
 
-  if (!referrer || referrer.id === referredUserId) {
-    return null
+  if (!referrer) {
+    throw new InvalidReferralCodeError('This referral code is not valid')
+  }
+
+  if (referrer.id === referredUserId) {
+    throw new InvalidReferralCodeError('You cannot use your own referral code')
   }
 
   const { data: existing } = await adminClient
@@ -291,7 +304,6 @@ export async function grantKafeiPass(
   }
 
   const now = Date.now()
-  const durationMs = settings.pass_duration_days * 24 * 60 * 60 * 1000
   const activeUntil = wallet.pass_active_until
     ? new Date(wallet.pass_active_until).getTime()
     : 0
@@ -301,9 +313,10 @@ export async function grantKafeiPass(
     if (wallet.pass_pending_until) {
       return { granted: false, reason: 'Already have active + pending Pass' as const }
     }
-    const pendingUntil = new Date(
-      activeUntil + durationMs
-    ).toISOString()
+    const pendingUntil = addInclusiveSingaporeDaysEndIso(
+      settings.pass_duration_days,
+      new Date(activeUntil + 1)
+    )
     await adminClient
       .from('user_wallets')
       .update({
@@ -315,7 +328,7 @@ export async function grantKafeiPass(
     return { granted: true, pending: true, pass_pending_until: pendingUntil }
   }
 
-  const until = addDaysIso(settings.pass_duration_days)
+  const until = addInclusiveSingaporeDaysEndIso(settings.pass_duration_days)
   await adminClient
     .from('user_wallets')
     .update({

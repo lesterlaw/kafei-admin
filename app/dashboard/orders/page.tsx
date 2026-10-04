@@ -34,6 +34,7 @@ export default async function OrdersPage() {
         columns={orderColumns}
         data={orders}
         searchKey="order_number"
+        exportFilename="orders"
         rowHrefBase="/dashboard/orders"
       />
     </div>

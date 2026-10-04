@@ -406,9 +406,17 @@ async function upsertAddOnsFromItems(
     }
 
     if (existing) {
+      // Keep admin display name, price, and visibility. Sync only machine keys.
       const { error } = await adminClient
         .from('add_ons')
-        .update(payload)
+        .update({
+          description: payload.description,
+          cofeplus_group: payload.cofeplus_group,
+          cofeplus_flag: payload.cofeplus_flag,
+          cofeplus_locator: payload.cofeplus_locator,
+          source: payload.source,
+          updated_at: payload.updated_at,
+        })
         .eq('id', existing.id)
       if (!error) upserted += 1
     } else {

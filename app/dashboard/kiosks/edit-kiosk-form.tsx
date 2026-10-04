@@ -97,8 +97,8 @@ export function EditKioskForm({ kiosk }: { kiosk: Kiosk }) {
           disabled={isLoading}
         />
         <p className="text-xs text-muted-foreground">
-          Machine serial used for pickup QR dispatches. Leave empty for
-          non-machine kiosks.
+          Machine serial used when Kafei admin starts an immediate brew.
+          Leave empty for non-machine kiosks.
         </p>
       </div>
       <div className="space-y-2">
@@ -131,9 +131,13 @@ export function EditKioskForm({ kiosk }: { kiosk: Kiosk }) {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="true">Active</SelectItem>
-            <SelectItem value="false">Inactive</SelectItem>
+            <SelectItem value="false">Blocked</SelectItem>
           </SelectContent>
         </Select>
+        <p className="text-xs text-muted-foreground">
+          Blocked kiosks are hidden from the customer app and the tablet APK
+          will not scan.
+        </p>
       </div>
       <Button type="submit" className="w-full" disabled={isLoading}>
         {isLoading ? 'Updating...' : 'Update Kiosk'}

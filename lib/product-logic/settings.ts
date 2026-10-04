@@ -107,3 +107,40 @@ export function addDaysIso(days: number, from = new Date()): string {
   d.setUTCDate(d.getUTCDate() + days)
   return d.toISOString()
 }
+
+/** Singapore calendar day as YYYY-MM-DD from an ISO timestamp. */
+export function singaporeDateFromIso(value: string | Date): string {
+  return singaporeDateString(value instanceof Date ? value : new Date(value))
+}
+
+/** Start/end of the Singapore calendar day containing `from`. */
+export function singaporeDayBounds(from = new Date()): {
+  ymd: string
+  start: Date
+  end: Date
+} {
+  const ymd = singaporeDateString(from)
+  return {
+    ymd,
+    start: new Date(`${ymd}T00:00:00.000+08:00`),
+    end: new Date(`${ymd}T23:59:59.999+08:00`),
+  }
+}
+
+/**
+ * Inclusive Singapore calendar window.
+ * 7 days starting 7 Sept ends 13 Sept 23:59:59.999 SGT.
+ */
+export function addInclusiveSingaporeDaysEndIso(
+  days: number,
+  from = new Date()
+): string {
+  const startYmd = singaporeDateString(from)
+  const [year, month, day] = startYmd.split('-').map(Number)
+  const inclusiveOffset = Math.max(1, days) - 1
+  const end = new Date(Date.UTC(year, month - 1, day + inclusiveOffset))
+  const yyyy = end.getUTCFullYear()
+  const mm = String(end.getUTCMonth() + 1).padStart(2, '0')
+  const dd = String(end.getUTCDate()).padStart(2, '0')
+  return new Date(`${yyyy}-${mm}-${dd}T23:59:59.999+08:00`).toISOString()
+}

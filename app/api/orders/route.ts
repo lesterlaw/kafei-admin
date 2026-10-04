@@ -1,4 +1,4 @@
-import { NextRequest } from 'next/server'
+import { NextRequest, after } from 'next/server'
 import { createApiResponse, createApiError, authenticateRequest } from '@/lib/api/middleware'
 import { createClient } from '@supabase/supabase-js'
 import { z } from 'zod'
@@ -17,7 +17,24 @@ import {
   isLatteOrAmericano,
   takeUnusedAddonCoupon,
   WELCOME_PROMO_CODE,
+  hasUsedWelcomeDrink,
+  hasUsedPassDrinkToday,
+  isCouponReservedOnOpenOrder,
 } from '@/lib/product-logic'
+import {
+  drinkSupportsLatteArt,
+  ensureCatalogLatteArtLocator,
+  isHostedLatteArtLocator,
+  pickCatalogPreset,
+} from '@/lib/cofeplus/latte-art'
+import {
+  handArtLocator,
+  isPlainHotLatte,
+  type HandLatteArtDesign,
+  type LatteArtFlag,
+} from '@/lib/cofeplus/latte-art-contract'
+
+export const maxDuration = 25
 
 const uuidSchema = z.string().uuid()
 
@@ -43,6 +60,12 @@ const createOrderSchema = z.object({
     .enum(['daily_coupon', 'second_cup', 'welcome', 'stamp', 'bean_drink', 'cash'])
     .optional(),
   cofeplus_environment: z.enum(['test', 'live']).optional(),
+  latte_art: z
+    .object({
+      flag: z.enum(['none', 'catalog', 'upload', 'heart', 'leaf']),
+      locator: z.string().trim().optional(),
+    })
+    .optional(),
 })
 
 function getErrorMessage(error: unknown) {
@@ -106,8 +129,15 @@ export async function POST(request: NextRequest) {
       return createApiError('Invalid order payload', 400)
     }
 
-    const { kiosk_id, product_id, addons, coupon_id, redemption_id, entitlement } =
-      validationResult.data
+    const {
+      kiosk_id,
+      product_id,
+      addons,
+      coupon_id,
+      redemption_id,
+      entitlement,
+      latte_art: latteArtInput,
+    } = validationResult.data
     const adminClient = getAdminClient()
     const environment = resolveCofeplusEnvironment(
       await getActiveCofeplusEnvironment(adminClient)
@@ -144,6 +174,57 @@ export async function POST(request: NextRequest) {
     if (kioskError || !kiosk) {
       console.error('Kiosk not found:', kiosk_id, kioskError)
       return createApiError('Kiosk not found', 404)
+    }
+
+    let latteArtFlag: LatteArtFlag | null = null
+    let latteArtLocator: string | null = null
+    if (latteArtInput && latteArtInput.flag !== 'none') {
+      if (!drinkSupportsLatteArt(product.name, product.temperature)) {
+        return createApiError(
+          'Latte art is only available on hot milk drinks like latte and cappuccino.',
+          400
+        )
+      }
+
+      const requestedDesign: HandLatteArtDesign | 'random' | null =
+        latteArtInput.flag === 'heart' || latteArtInput.flag === 'leaf'
+          ? latteArtInput.flag
+          : latteArtInput.flag === 'catalog' &&
+              isPlainHotLatte(product.name, product.temperature)
+            ? 'random'
+            : null
+
+      if (requestedDesign) {
+        if (!isPlainHotLatte(product.name, product.temperature)) {
+          return createApiError(
+            'Heart and leaf art are only available on a hot latte.',
+            400
+          )
+        }
+        const design: HandLatteArtDesign =
+          requestedDesign === 'random' ? pickCatalogPreset() : requestedDesign
+        latteArtFlag = 'catalog'
+        latteArtLocator = handArtLocator(design)
+      } else if (latteArtInput.flag === 'upload') {
+        latteArtFlag = 'upload'
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
+        const locator = latteArtInput.locator || ''
+        if (!isHostedLatteArtLocator(locator, supabaseUrl)) {
+          return createApiError('Upload a latte art photo first.', 400)
+        }
+        latteArtLocator = locator.split('?')[0]
+      } else {
+        latteArtFlag = 'catalog'
+        try {
+          latteArtLocator = await ensureCatalogLatteArtLocator(
+            adminClient,
+            pickCatalogPreset()
+          )
+        } catch (err) {
+          console.error('[orders] catalog latte art failed', err)
+          return createApiError('Could not prepare latte art. Try again.', 500)
+        }
+      }
     }
 
     const drinkPrice = Number(product.price)
@@ -207,6 +288,7 @@ export async function POST(request: NextRequest) {
 
     let validatedCouponId: string | null = null
     let appliedAddonCouponId: string | null = null
+    let dailyDrinkCouponId: string | null = null
 
     if (coupon_id) {
       const { data: coupon } = await adminClient
@@ -229,13 +311,35 @@ export async function POST(request: NextRequest) {
         if (kind === 'referral_addon') {
           total = Math.max(0, Math.round((total - addonTotal) * 100) / 100)
           appliedAddonCouponId = coupon.id
-        } else if (kind === 'welcome' || kind === 'referral_drink' || kind === 'pass') {
-          if (!isLatteOrAmericano(product.name || '')) {
-            return createApiError('This coupon is for Latte or Americano only', 400)
+        } else if (kind === 'welcome' || kind === 'referral_drink' || kind === 'pass' || kind === 'daily_24h') {
+          if (kind === 'welcome' && (await hasUsedWelcomeDrink(adminClient, user.id))) {
+            return createApiError('Welcome drink already used', 400)
+          }
+          if (
+            (kind === 'pass' || kind === 'daily_24h') &&
+            (await isCouponReservedOnOpenOrder(adminClient, coupon.id, user.id))
+          ) {
+            return createApiError('This drink coupon is already on another order', 400)
+          }
+          if (
+            (kind === 'pass' || kind === 'daily_24h') &&
+            (await hasUsedPassDrinkToday(adminClient, user.id, coupon.id))
+          ) {
+            return createApiError('7-Day Pass drink coupon can only be used once per day', 400)
+          }
+          if (kind === 'welcome' || kind === 'referral_drink' || kind === 'pass') {
+            if (!isLatteOrAmericano(product.name || '')) {
+              return createApiError('This coupon is for Latte or Americano only', 400)
+            }
           }
           total = Math.max(0, Math.round((total - drinkPrice) * 100) / 100)
           validatedCouponId = coupon.id
-          entitlementType = entitlementType || kind
+          if (kind === 'pass' || kind === 'daily_24h') {
+            dailyDrinkCouponId = coupon.id
+            entitlementType = entitlementType || (kind === 'pass' ? 'pass' : 'daily_coupon')
+          } else {
+            entitlementType = entitlementType || kind
+          }
         } else {
           total = Math.max(0, Math.round((total - drinkPrice) * 100) / 100)
           validatedCouponId = coupon.id
@@ -288,12 +392,7 @@ export async function POST(request: NextRequest) {
           if (!isLatteOrAmericano(product.name || '')) {
             return createApiError('Welcome drink must be Latte or Americano', 400)
           }
-          const { data: wallet } = await adminClient
-            .from('user_wallets')
-            .select('welcome_drink_available')
-            .eq('user_id', user.id)
-            .maybeSingle()
-          if (wallet && wallet.welcome_drink_available === false) {
+          if (await hasUsedWelcomeDrink(adminClient, user.id)) {
             return createApiError('Welcome drink already used', 400)
           }
         }
@@ -444,6 +543,8 @@ export async function POST(request: NextRequest) {
         quantity: 1,
         price: product.price,
         addons: addons ? JSON.stringify(addons) : '[]',
+        latte_art_flag: latteArtFlag,
+        latte_art_locator: latteArtLocator,
       })
 
     if (itemError) {
@@ -474,6 +575,18 @@ export async function POST(request: NextRequest) {
         .eq('is_redeemed', false)
     }
 
+    if (dailyDrinkCouponId) {
+      await adminClient
+        .from('coupons')
+        .update({
+          is_redeemed: true,
+          redeemed_at: new Date().toISOString(),
+          order_id: order.id,
+        })
+        .eq('id', dailyDrinkCouponId)
+        .eq('is_redeemed', false)
+    }
+
     try {
       const { activateReferralOnFirstDrink } = await import(
         '@/lib/product-logic/referrals'
@@ -501,12 +614,14 @@ export async function POST(request: NextRequest) {
         finalOrder as MachineOrderRow
       )
 
-      // Do not await CofePlus here. Checkout must return immediately after
-      // payment; the confirmation screen polls and unlocks the QR.
-      void tryActivateNextQueuedOrder(adminClient, cofeplusPodId, environment).catch(
-        (error) => {
-          console.error('[orders] background activate failed', error)
-        }
+      // Checkout must return immediately after payment. Continue activation
+      // after the response so Vercel does not freeze a claimed-but-empty QR.
+      after(() =>
+        tryActivateNextQueuedOrder(adminClient, cofeplusPodId, environment).catch(
+          (error) => {
+            console.error('[orders] background activate failed', error)
+          }
+        )
       )
     }
 

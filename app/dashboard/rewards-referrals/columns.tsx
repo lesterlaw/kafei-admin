@@ -3,19 +3,7 @@
 import { ColumnDef } from '@tanstack/react-table'
 import { Badge } from '@/components/ui/badge'
 import Link from 'next/link'
-
-function formatDateTime(value: string | null | undefined) {
-  if (!value) return '—'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '—'
-  return date.toLocaleString('en-SG', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  })
-}
+import { formatSingaporeDateTime } from '@/lib/datetime'
 
 export type ReferralRow = {
   id: string
@@ -84,11 +72,11 @@ export const referralColumns: ColumnDef<ReferralRow>[] = [
   {
     accessorKey: 'activated_at',
     header: 'Activated',
-    cell: ({ row }) => formatDateTime(row.getValue('activated_at') as string | null),
+    cell: ({ row }) => formatSingaporeDateTime(row.getValue('activated_at') as string | null),
   },
   {
     accessorKey: 'created_at',
     header: 'Signed up',
-    cell: ({ row }) => formatDateTime(row.getValue('created_at') as string),
+    cell: ({ row }) => formatSingaporeDateTime(row.getValue('created_at') as string),
   },
 ]

@@ -7,14 +7,19 @@ import {
 import { createClient } from '@supabase/supabase-js'
 import {
   fetchDispatchSnapshot,
-  isSimulatedDispatchId,
+  isLocalDispatchId,
 } from '@/lib/cofeplus/dispatch'
+import type { DispatchSnapshot } from '@/components/api-test/cofeplus-test-shared'
 import { resolveCofeplusEnvironment } from '@/lib/cofeplus/proxy'
 import {
+  persistMappedDispatchStatus,
   refreshOrderQueueState,
   syntheticPodIdForKiosk,
+  tryActivateNextQueuedOrder,
   type MachineOrderRow,
 } from '@/lib/cofeplus/queue'
+
+export const maxDuration = 25
 
 const ORDER_DETAIL_SELECT = '*, kiosks(*), order_items(*, products(*))'
 
@@ -136,24 +141,65 @@ export async function GET(
       .eq('id', refreshed.id)
       .single()
 
-    const currentOrder = fullOrder || { ...order, ...refreshed }
+    let currentOrder = fullOrder || { ...order, ...refreshed }
     const currentEnvironment = resolveCofeplusEnvironment(
       currentOrder.cofeplus_environment
     )
 
-    let dispatch = null
+    let dispatch: DispatchSnapshot | null = null
+    const hasFreshPickup =
+      Boolean(currentOrder.pickup_code) && currentOrder.status === 'pending'
     if (
       currentOrder.cofeplus_dispatch_id &&
       currentOrder.cofeplus_pod_id &&
-      !isSimulatedDispatchId(currentOrder.cofeplus_dispatch_id)
+      !isLocalDispatchId(currentOrder.cofeplus_dispatch_id) &&
+      !hasFreshPickup
     ) {
       const snapshot = await fetchDispatchSnapshot(
         currentOrder.cofeplus_pod_id,
         currentOrder.cofeplus_dispatch_id,
-        currentEnvironment
+        currentEnvironment,
+        {
+          // A brand-new pickup QR can 404 on GET-by-id. Do not treat that
+          // as collected or the app hides the QR and shows a spinner.
+          completeIfMissing: currentOrder.status !== 'pending',
+        }
       )
       if (snapshot.ok) {
         dispatch = snapshot.snapshot
+        if (
+          (!dispatch.pickupCode || dispatch.pickupCode === '(none)') &&
+          currentOrder.pickup_code
+        ) {
+          dispatch = {
+            ...dispatch,
+            pickupCode: currentOrder.pickup_code,
+          }
+        }
+
+        const synced = await persistMappedDispatchStatus(
+          adminClient,
+          currentOrder as MachineOrderRow,
+          dispatch
+        )
+        if (synced.status !== currentOrder.status) {
+          const { data: written } = await adminClient
+            .from('orders')
+            .select(ORDER_DETAIL_SELECT)
+            .eq('id', synced.id)
+            .single()
+          currentOrder = written || { ...currentOrder, ...synced }
+          if (
+            (synced.status === 'completed' || synced.status === 'cancelled') &&
+            currentOrder.cofeplus_pod_id
+          ) {
+            await tryActivateNextQueuedOrder(
+              adminClient,
+              currentOrder.cofeplus_pod_id,
+              currentEnvironment
+            )
+          }
+        }
       }
     } else if (
       currentOrder.pickup_code &&

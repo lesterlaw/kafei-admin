@@ -2,6 +2,7 @@
 
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { getKioskDevice, issueKioskDeviceToken } from '@/lib/kiosk/device'
 import { revalidatePath } from 'next/cache'
 
 async function verifyAdmin() {
@@ -55,7 +56,24 @@ export async function getKioskById(id: string) {
     throw new Error(error.message)
   }
 
-  return data
+  const device = await getKioskDevice(id)
+  return {
+    ...data,
+    has_device_token: Boolean(device?.device_token),
+    device_token: device?.device_token || null,
+    device_last_seen_at: device?.last_seen_at || null,
+  }
+}
+
+export async function regenerateKioskDeviceToken(kioskId: string) {
+  await verifyAdmin()
+  const result = await issueKioskDeviceToken(kioskId)
+  if (!result.ok) {
+    return { error: result.error }
+  }
+  revalidatePath('/dashboard/kiosks')
+  revalidatePath(`/dashboard/kiosks/${kioskId}`)
+  return { success: true, token: result.token }
 }
 
 export async function createKiosk(formData: FormData) {
@@ -126,6 +144,23 @@ export async function updateKiosk(id: string, formData: FormData) {
   }
 
   revalidatePath('/dashboard/kiosks')
+  return { success: true }
+}
+
+export async function updateKioskStatus(id: string, isActive: boolean) {
+  await verifyAdmin()
+  const supabase = createAdminClient()
+  const { error } = await supabase
+    .from('kiosks')
+    .update({ is_active: isActive })
+    .eq('id', id)
+
+  if (error) {
+    return { error: error.message }
+  }
+
+  revalidatePath('/dashboard/kiosks')
+  revalidatePath(`/dashboard/kiosks/${id}`)
   return { success: true }
 }
 

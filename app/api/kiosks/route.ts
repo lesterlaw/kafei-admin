@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createApiResponse, createApiError, authenticateRequest } from '@/lib/api/middleware'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { publicKioskColumns } from '@/lib/kiosk/device'
 
 export async function GET(request: NextRequest) {
   try {
@@ -12,7 +13,7 @@ export async function GET(request: NextRequest) {
     const supabase = await createServerSupabaseClient()
     const { data, error } = await supabase
       .from('kiosks')
-      .select('*')
+      .select(publicKioskColumns())
       .eq('is_active', true)
       .order('name', { ascending: true })
 

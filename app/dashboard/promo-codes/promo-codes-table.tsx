@@ -12,5 +12,12 @@ export function PromoCodesTable({
   userIdsByPromo: Record<string, string>
 }) {
   const columns = createPromoCodeColumns(userIdsByPromo)
-  return <DataTable columns={columns} data={promoCodes} searchKey="name" />
+  return (
+    <DataTable
+      columns={columns}
+      data={promoCodes}
+      searchKey="name"
+      exportFilename="promo-codes"
+    />
+  )
 }

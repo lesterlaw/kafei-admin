@@ -1,6 +1,7 @@
 import { getUserById } from '@/app/actions/users'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getAvailableBeans, resolveMembership } from '@/lib/product-logic'
+import { formatSingaporeDateTime } from '@/lib/datetime'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { notFound } from 'next/navigation'
@@ -158,7 +159,7 @@ export default async function UserDetailPage({
             <div>
               <p className="text-sm text-muted-foreground">Created At</p>
               <p className="font-medium">
-                {new Date(user.created_at).toLocaleString()}
+                {formatSingaporeDateTime(user.created_at)}
               </p>
             </div>
           </CardContent>
@@ -204,12 +205,12 @@ export default async function UserDetailPage({
                   <p className="font-medium text-sm">
                     Active:{' '}
                     {walletSummary.passActive
-                      ? new Date(walletSummary.passActive).toLocaleString()
+                      ? formatSingaporeDateTime(walletSummary.passActive)
                       : '—'}
                     <br />
                     Pending:{' '}
                     {walletSummary.passPending
-                      ? new Date(walletSummary.passPending).toLocaleString()
+                      ? formatSingaporeDateTime(walletSummary.passPending)
                       : '—'}
                   </p>
                 </div>
@@ -236,9 +237,9 @@ export default async function UserDetailPage({
                 </a>
                 <span className="ml-2 text-sm font-normal text-muted-foreground">
                   {referredBy.referral_code} · {referredBy.status} · signed up{' '}
-                  {new Date(referredBy.created_at).toLocaleString()}
+                  {formatSingaporeDateTime(referredBy.created_at)}
                   {referredBy.activated_at
-                    ? ` · activated ${new Date(referredBy.activated_at).toLocaleString()}`
+                    ? ` · activated ${formatSingaporeDateTime(referredBy.activated_at)}`
                     : ''}
                 </span>
               </p>
@@ -266,9 +267,9 @@ export default async function UserDetailPage({
                       {row.full_name || row.email || row.id || 'Unknown user'}
                     </a>
                     <p className="text-sm text-muted-foreground">
-                      {row.status} · {new Date(row.created_at).toLocaleString()}
+                      {row.status} · {formatSingaporeDateTime(row.created_at)}
                       {row.activated_at
-                        ? ` · activated ${new Date(row.activated_at).toLocaleString()}`
+                        ? ` · activated ${formatSingaporeDateTime(row.activated_at)}`
                         : ''}
                     </p>
                   </div>

@@ -6,5 +6,12 @@ import { createBannerColumns } from './columns'
 
 export function BannersTable({ banners }: { banners: Banner[] }) {
   const columns = createBannerColumns(banners)
-  return <DataTable columns={columns} data={banners} searchKey="title" />
+  return (
+    <DataTable
+      columns={columns}
+      data={banners}
+      searchKey="title"
+      exportFilename="banners"
+    />
+  )
 }

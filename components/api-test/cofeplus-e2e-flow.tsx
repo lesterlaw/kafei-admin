@@ -41,6 +41,8 @@ import {
   buildDispatchBody,
   formatJson,
   isDispatchArchivedError,
+  LATTE_ART_GROUP,
+  LATTE_ART_LOCATOR_CHOICE,
   modifierExtraTotal,
   modifiersToChoiceMap,
   parseCreateDispatch,
@@ -563,7 +565,11 @@ export function CofeplusE2eFlow({
       selectedItem.modifierGroups,
       nextPreferred
     )
-    setModifierChoices(modifiersToChoiceMap(resolved))
+    const next = modifiersToChoiceMap(resolved)
+    if (group === LATTE_ART_GROUP) next[LATTE_ART_GROUP] = flag
+    const locator = modifierChoices[LATTE_ART_LOCATOR_CHOICE]
+    if (locator) next[LATTE_ART_LOCATOR_CHOICE] = locator
+    setModifierChoices(next)
   }
 
   const fetchDispatchOnce = async (
@@ -1022,10 +1028,12 @@ export function CofeplusE2eFlow({
                               )
                             })
                             const value =
-                              modifierChoices[group.group] ||
-                              options.find((o) => o.isDefault)?.flag ||
-                              options[0]?.flag ||
-                              ''
+                              group.group === LATTE_ART_GROUP
+                                ? modifierChoices[group.group] || 'none'
+                                : modifierChoices[group.group] ||
+                                  options.find((o) => o.isDefault)?.flag ||
+                                  options[0]?.flag ||
+                                  ''
 
                             return (
                               <div key={group.group} className="space-y-1.5">
@@ -1065,6 +1073,33 @@ export function CofeplusE2eFlow({
                                     ))}
                                   </SelectContent>
                                 </Select>
+                                {group.group === LATTE_ART_GROUP &&
+                                (value === 'catalog' || value === 'upload') ? (
+                                  <div className="space-y-1.5">
+                                    <Label className="text-xs">
+                                      Latte art image URL
+                                    </Label>
+                                    <Input
+                                      value={
+                                        modifierChoices[
+                                          LATTE_ART_LOCATOR_CHOICE
+                                        ] || ''
+                                      }
+                                      placeholder="https://example.com/latte-art/heart.jpg"
+                                      onChange={(event) =>
+                                        setModifierChoices((prev) => ({
+                                          ...prev,
+                                          [LATTE_ART_LOCATOR_CHOICE]:
+                                            event.target.value.trim(),
+                                        }))
+                                      }
+                                    />
+                                    <p className="text-[11px] leading-4 text-muted-foreground">
+                                      JPG, 800x800, 72 DPI. Artwork belongs in
+                                      the center 640px circle.
+                                    </p>
+                                  </div>
+                                ) : null}
                               </div>
                             )
                           })}

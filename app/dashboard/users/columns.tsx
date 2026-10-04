@@ -5,6 +5,7 @@ import { User } from '@/types/database'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { deleteUser, updateUserStatus } from '@/app/actions/users'
+import { formatSingaporeDate } from '@/lib/datetime'
 import { Trash2, Ban, CheckCircle, Pencil } from 'lucide-react'
 import Link from 'next/link'
 import {
@@ -155,8 +156,7 @@ export const userColumns: ColumnDef<User>[] = [
     cell: ({ row }) => {
       const value = row.getValue('created_at')
       if (!value) return '—'
-      const date = new Date(String(value))
-      return Number.isNaN(date.getTime()) ? '—' : date.toLocaleDateString()
+      return formatSingaporeDate(String(value))
     },
   },
   {

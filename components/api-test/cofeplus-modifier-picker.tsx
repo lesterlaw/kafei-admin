@@ -1,6 +1,7 @@
 'use client'
 
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
   Select,
@@ -10,6 +11,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import {
+  LATTE_ART_GROUP,
+  LATTE_ART_LOCATOR_CHOICE,
   modifiersToChoiceMap,
   selectModifiersFromGroups,
   type PodItemOption,
@@ -39,13 +42,16 @@ export function CofeplusModifierPicker({
     configured.find((modifier) => modifier.group === 'temperature')?.flag
 
   const handleChange = (group: string, flag: string) => {
+    const next = modifiersToChoiceMap(
+      selectModifiersFromGroups(item.modifierGroups, {
+        ...choices,
+        [group]: flag,
+      })
+    )
+    if (group === LATTE_ART_GROUP) next[LATTE_ART_GROUP] = flag
+    const locator = choices[LATTE_ART_LOCATOR_CHOICE]
     onChange(
-      modifiersToChoiceMap(
-        selectModifiersFromGroups(item.modifierGroups, {
-          ...choices,
-          [group]: flag,
-        })
-      )
+      locator ? { ...next, [LATTE_ART_LOCATOR_CHOICE]: locator } : next
     )
   }
 
@@ -72,10 +78,12 @@ export function CofeplusModifierPicker({
           })
           const pool = options.length > 0 ? options : group.options
           const value =
-            choices[group.group] ||
-            pool.find((option) => option.isDefault)?.flag ||
-            pool[0]?.flag ||
-            ''
+            group.group === LATTE_ART_GROUP
+              ? choices[group.group] || 'none'
+              : choices[group.group] ||
+                pool.find((option) => option.isDefault)?.flag ||
+                pool[0]?.flag ||
+                ''
 
           return (
             <div key={group.group} className="space-y-1.5">
@@ -99,6 +107,27 @@ export function CofeplusModifierPicker({
                   ))}
                 </SelectContent>
               </Select>
+              {group.group === LATTE_ART_GROUP &&
+              (value === 'catalog' || value === 'upload') ? (
+                <div className="space-y-1.5 sm:col-span-2">
+                  <Label className="text-xs">Latte art image URL</Label>
+                  <Input
+                    value={choices[LATTE_ART_LOCATOR_CHOICE] || ''}
+                    placeholder="https://example.com/latte-art/heart.jpg"
+                    onChange={(event) =>
+                      onChange({
+                        ...choices,
+                        [LATTE_ART_GROUP]: value,
+                        [LATTE_ART_LOCATOR_CHOICE]: event.target.value.trim(),
+                      })
+                    }
+                  />
+                  <p className="text-[11px] leading-4 text-muted-foreground">
+                    Required for random catalog art and uploads. JPG, 800x800,
+                    72 DPI. Keep the design inside the center 640px circle.
+                  </p>
+                </div>
+              ) : null}
             </div>
           )
         })}

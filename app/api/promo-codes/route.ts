@@ -8,8 +8,10 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import {
   getUnusedRewardCoupons,
   WELCOME_PROMO_CODE,
+  assignWelcomeDrinkPromo,
   getOrCreateDailyCoupon,
   isSecondCupEligible,
+  isWelcomeDrinkAvailable,
 } from '@/lib/product-logic'
 
 function couponTitle(kind: string, code: string) {
@@ -53,11 +55,10 @@ export async function GET(request: NextRequest) {
       (userAssignments || []).map((row) => row.promo_code_id)
     )
 
-    const { data: wallet } = await supabase
-      .from('user_wallets')
-      .select('welcome_drink_available')
-      .eq('user_id', user.id)
-      .maybeSingle()
+    const welcomeAvailable = await isWelcomeDrinkAvailable(supabase, user.id)
+    if (welcomeAvailable) {
+      await assignWelcomeDrinkPromo(supabase, user.id)
+    }
 
     const applicable = (allActive || []).filter((promo) => {
       if (promo.type === 'referral' || promo.code === 'REF3FREE') {
@@ -70,13 +71,25 @@ export async function GET(request: NextRequest) {
         return false
       }
       if (promo.code === WELCOME_PROMO_CODE) {
-        return (
-          assignedIds.has(promo.id) && wallet?.welcome_drink_available !== false
-        )
+        return welcomeAvailable
       }
       if (promo.applies_to_all_users) return true
       return assignedIds.has(promo.id)
     })
+
+    if (
+      welcomeAvailable &&
+      !applicable.some((promo) => promo.code === WELCOME_PROMO_CODE)
+    ) {
+      const { data: welcome } = await supabase
+        .from('promo_codes')
+        .select('*')
+        .eq('code', WELCOME_PROMO_CODE)
+        .maybeSingle()
+      if (welcome) {
+        applicable.push(welcome)
+      }
+    }
 
     const rewardCoupons = await getUnusedRewardCoupons(supabase, user.id)
     const asPromos: Array<{
@@ -133,7 +146,12 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    return createApiResponse([...asPromos, ...applicable])
+    return createApiResponse([
+      ...asPromos,
+      ...applicable.map((promo) =>
+        promo.code === WELCOME_PROMO_CODE ? { ...promo, kind: 'welcome' } : promo
+      ),
+    ])
   } catch (error: any) {
     return createApiError(error.message || 'Internal server error', 500)
   }

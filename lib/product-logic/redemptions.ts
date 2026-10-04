@@ -3,8 +3,10 @@ import { getProductLogicSettings } from '@/lib/product-logic/settings'
 import {
   deductBeans,
   getAvailableBeans,
+  hasUsedWelcomeDrink,
   resolveMembership,
 } from '@/lib/product-logic/wallet'
+import { hasUsedPassDrinkToday, isSecondCupEligible } from '@/lib/product-logic/coupons'
 
 export type RedemptionType =
   | 'welcome'
@@ -52,7 +54,7 @@ export async function createRedemptionHold(
 
   switch (input.type) {
     case 'welcome': {
-      if (!wallet.welcome_drink_available) {
+      if (await hasUsedWelcomeDrink(adminClient, input.userId)) {
         throw new Error('Welcome drink already used')
       }
       if (!productId) {
@@ -141,7 +143,17 @@ export async function createRedemptionHold(
     }
     case 'daily_coupon':
     case 'pass_coupon':
+      if (await hasUsedPassDrinkToday(adminClient, input.userId)) {
+        throw new Error('Drink coupon can only be redeemed once per day')
+      }
+      break
     case 'second_cup':
+      if (!(await isSecondCupEligible(adminClient, input.userId))) {
+        throw new Error(
+          'Second cup 50% off is only for your second drink of the day'
+        )
+      }
+      break
     case 'cash':
       break
     default:

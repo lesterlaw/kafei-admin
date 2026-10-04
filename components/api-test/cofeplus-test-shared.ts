@@ -1,4 +1,10 @@
 import type { CofeplusEnvironment } from '@/lib/cofeplus/config'
+import {
+  LATTE_ART_GROUP,
+  LATTE_ART_LOCATOR_CHOICE,
+} from '@/lib/cofeplus/latte-art-contract'
+
+export { LATTE_ART_GROUP, LATTE_ART_LOCATOR_CHOICE }
 
 export type { CofeplusEnvironment }
 
@@ -91,6 +97,13 @@ export interface DispatchSnapshot {
   archived: boolean
   itemCount: number
   lineItemCodes: string[]
+  lineItemStatuses?: string[]
+  /** Set after the machine scan binds a hole. Omitted until then. */
+  deliveryPort?: number | null
+  displayNote?: string
+  temperature?: string
+  milk?: string
+  timeCreated?: string
 }
 
 export interface HealthReadiness {
@@ -248,6 +261,20 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>
 }
 
+function readNonEmptyString(
+  record: Record<string, unknown> | null,
+  ...keys: string[]
+): string {
+  if (!record) return ''
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === 'string' && value.trim() && value !== '(none)') {
+      return value.trim()
+    }
+  }
+  return ''
+}
+
 function parseModifierGroups(rawModifiers: unknown): ModifierGroup[] {
   if (!Array.isArray(rawModifiers)) return []
 
@@ -270,14 +297,17 @@ function parseModifierGroups(rawModifiers: unknown): ModifierGroup[] {
 
             const requiresRecord = asRecord(option.requires)
             let requires: ModifierOption['requires']
-            if (
-              requiresRecord &&
-              typeof requiresRecord.group === 'string' &&
-              Array.isArray(requiresRecord.options)
-            ) {
-              const flags = requiresRecord.options
-                .map((entry) => asRecord(entry)?.flag)
-                .filter((entry): entry is string => typeof entry === 'string')
+            if (requiresRecord && typeof requiresRecord.group === 'string') {
+              let flags: string[] = []
+              if (Array.isArray(requiresRecord.flags)) {
+                flags = requiresRecord.flags.filter(
+                  (entry): entry is string => typeof entry === 'string'
+                )
+              } else if (Array.isArray(requiresRecord.options)) {
+                flags = requiresRecord.options
+                  .map((entry) => asRecord(entry)?.flag)
+                  .filter((entry): entry is string => typeof entry === 'string')
+              }
               if (flags.length > 0) {
                 requires = { group: requiresRecord.group, flags }
               }
@@ -338,36 +368,55 @@ export function selectModifiersFromGroups(
   const temperatureGroup = groups.find((group) => group.group === 'temperature')
   if (temperatureGroup) {
     const preferredFlag = preferred.temperature
+    const wantsIced = Boolean(preferredFlag?.startsWith('iced'))
     const selected =
       temperatureGroup.options.find((option) => option.flag === preferredFlag) ||
-      temperatureGroup.options.find((option) => option.isDefault) ||
-      temperatureGroup.options[0]
+      (wantsIced
+        ? temperatureGroup.options.find((option) =>
+            option.flag.startsWith('iced')
+          )
+        : null) ||
+      (wantsIced
+        ? null
+        : temperatureGroup.options.find((option) => option.isDefault) ||
+          temperatureGroup.options[0])
     if (selected) selectedByGroup.set('temperature', selected.flag)
   }
 
   for (const group of groups) {
+    if (group.group === LATTE_ART_GROUP) {
+      const artFlag = preferred[LATTE_ART_GROUP]?.trim()
+      const locator = preferred[LATTE_ART_LOCATOR_CHOICE]?.trim()
+      // none, or no explicit choice: do not send the machine's default catalog art
+      if (!artFlag || artFlag === 'none' || !locator) continue
+      const artOption = group.options.find((option) => option.flag === artFlag)
+      const modifier: DispatchModifier = {
+        group: LATTE_ART_GROUP,
+        flag: artFlag,
+        locator,
+      }
+      if (typeof artOption?.price === 'number') modifier.price = artOption.price
+      result.push(modifier)
+      selectedByGroup.set(LATTE_ART_GROUP, artFlag)
+      continue
+    }
+
     const preferredFlag = preferred[group.group]
     const validOptions = group.options.filter((option) =>
       optionMatchesRequires(option, selectedByGroup)
     )
     const pool = validOptions.length > 0 ? validOptions : group.options
+    const wantsIced =
+      group.group === 'temperature' &&
+      Boolean(preferredFlag?.startsWith('iced'))
 
     const selected =
       pool.find((option) => option.flag === preferredFlag) ||
-      pool.find((option) => option.isDefault) ||
-      pool[0]
+      (wantsIced
+        ? pool.find((option) => option.flag.startsWith('iced'))
+        : pool.find((option) => option.isDefault) || pool[0])
 
     if (!selected) continue
-
-    // Skip empty latte-art; catalog/upload need locator we don't have in this tester
-    if (
-      group.group === 'latte-art' &&
-      (selected.flag === 'none' ||
-        selected.flag === 'catalog' ||
-        selected.flag === 'upload')
-    ) {
-      continue
-    }
 
     const modifier: DispatchModifier = {
       group: group.group,
@@ -381,6 +430,78 @@ export function selectModifiersFromGroups(
   }
 
   return result
+}
+
+/**
+ * Catalog selection first. If groups are missing or iced fell through to
+ * hot, overlay the caller's preferences so Ice Americano cannot brew hot.
+ */
+export function resolveDispatchModifiers(
+  item: PodItemOption,
+  preferred: Record<string, string> = {}
+): DispatchModifier[] {
+  const fromGroups =
+    Object.keys(preferred).length > 0
+      ? selectModifiersFromGroups(item.modifierGroups, preferred)
+      : item.modifiers
+
+  const preferredTemp = preferred.temperature
+  const selectedTemp = fromGroups.find((mod) => mod.group === 'temperature')?.flag
+  const icedPreferred = Boolean(preferredTemp?.startsWith('iced'))
+  const icedSelected = Boolean(selectedTemp?.startsWith('iced'))
+  const hotPreferred = preferredTemp === 'hot'
+  const hotSelected = selectedTemp === 'hot'
+
+  let result: DispatchModifier[]
+  if (
+    fromGroups.length > 0 &&
+    (!icedPreferred || icedSelected) &&
+    (!hotPreferred || hotSelected)
+  ) {
+    result = fromGroups
+  } else {
+    const byGroup = new Map(
+      (fromGroups.length > 0 ? fromGroups : item.modifiers).map((mod) => [
+        mod.group,
+        { ...mod },
+      ])
+    )
+    for (const [group, flag] of Object.entries(preferred)) {
+      if (!flag || group === LATTE_ART_LOCATOR_CHOICE) continue
+      if (group === LATTE_ART_GROUP) continue
+      byGroup.set(group, { group, flag })
+    }
+    result = [...byGroup.values()]
+  }
+
+  return applyLatteArtPreference(result, preferred)
+}
+
+/**
+ * Latte art is not a normal default modifier. Attach it only when the order
+ * asked for catalog or upload and we have a locator URL, even if this SKU's
+ * menu group omits latte-art.
+ */
+export function applyLatteArtPreference(
+  modifiers: DispatchModifier[],
+  preferred: Record<string, string>
+): DispatchModifier[] {
+  const rest = modifiers.filter((modifier) => modifier.group !== LATTE_ART_GROUP)
+  const flag = preferred[LATTE_ART_GROUP]?.trim()
+  const locator = preferred[LATTE_ART_LOCATOR_CHOICE]?.trim()
+  if (!flag || flag === 'none' || !locator) return rest
+  if (preferred.temperature?.startsWith('iced')) return rest
+
+  const existing = modifiers.find((modifier) => modifier.group === LATTE_ART_GROUP)
+  return [
+    ...rest,
+    {
+      group: LATTE_ART_GROUP,
+      flag,
+      locator,
+      ...(typeof existing?.price === 'number' ? { price: existing.price } : {}),
+    },
+  ]
 }
 
 export function modifiersToChoiceMap(
@@ -416,7 +537,14 @@ export function podItemFromCacheRow(row: {
         offMenu: item.offMenu === true,
         category: item.category || row.category || 'Menu',
         modifiers: item.modifiers,
-        modifierGroups: Array.isArray(item.modifierGroups) ? item.modifierGroups : [],
+        modifierGroups: (() => {
+          const parsed = parseModifierGroups(item.modifierGroups)
+          return parsed.length > 0
+            ? parsed
+            : Array.isArray(item.modifierGroups)
+              ? item.modifierGroups
+              : []
+        })(),
       }
     }
 
@@ -529,8 +657,12 @@ export function parsePodItems(raw: string): PodItemOption[] {
 }
 
 export function parseCreateDispatch(raw: string): CreateDispatchResult {
-  const data = JSON.parse(raw) as Record<string, unknown>
-  const id = typeof data.id === 'string' ? data.id : ''
+  const parsed = JSON.parse(raw) as unknown
+  const data = asRecord(parsed)
+  const nested = asRecord(data?.data) || asRecord(data?.dispatch)
+  const id =
+    readNonEmptyString(data, 'id') ||
+    readNonEmptyString(nested, 'id')
   if (!id) {
     throw new Error('Create dispatch response missing id')
   }
@@ -538,9 +670,13 @@ export function parseCreateDispatch(raw: string): CreateDispatchResult {
   return {
     id,
     orderNumber:
-      typeof data.orderNumber === 'string' ? data.orderNumber : '(none)',
+      readNonEmptyString(data, 'orderNumber', 'order_number', 'queueToken') ||
+      readNonEmptyString(nested, 'orderNumber', 'order_number', 'queueToken') ||
+      '(none)',
     pickupCode:
-      typeof data.pickupCode === 'string' ? data.pickupCode : '(none)',
+      readNonEmptyString(data, 'pickupCode', 'pickup_code') ||
+      readNonEmptyString(nested, 'pickupCode', 'pickup_code') ||
+      '(none)',
   }
 }
 
@@ -592,10 +728,53 @@ export function parseDispatchSnapshot(
   // If every line is already terminal, trust that over a stale parent state.
   const allLinesTerminal =
     lineStatuses.length > 0 &&
-    lineStatuses.every((status) => status === 'done' || status === 'failed')
+    lineStatuses.every(
+      (status) =>
+        status === 'done' ||
+        status === 'failed' ||
+        status === 'collected' ||
+        status === 'completed'
+    )
   if (allLinesTerminal) {
     state = lineStatuses.some((status) => status === 'failed') ? 'failed' : 'done'
   }
+
+  const archived =
+    data.archived === true ||
+    (typeof data.archivedAt === 'string' && Boolean(data.archivedAt)) ||
+    (typeof data.timeArchived === 'string' && Boolean(data.timeArchived)) ||
+    (typeof data.timeCompleted === 'string' && Boolean(data.timeCompleted)) ||
+    (typeof data.timeCollected === 'string' && Boolean(data.timeCollected))
+
+  const rawPort = data.deliveryPort ?? data.delivery_port
+  const deliveryPort =
+    rawPort === 2 || rawPort === 1 || rawPort === '2' || rawPort === '1'
+      ? Number(rawPort)
+      : null
+
+  const firstLine = lineRecords[0]
+  const displayNote =
+    (firstLine && typeof firstLine.displayNote === 'string'
+      ? firstLine.displayNote
+      : '') ||
+    (typeof data.displayNote === 'string' ? data.displayNote : '')
+  const firstModifiers = Array.isArray(firstLine?.modifiers)
+    ? firstLine.modifiers
+    : []
+  let temperature = ''
+  let milk = ''
+  for (const modifier of firstModifiers) {
+    const record = asRecord(modifier)
+    if (!record || typeof record.flag !== 'string') continue
+    if (record.group === 'temperature') temperature = record.flag
+    if (record.group === 'milk') milk = record.flag
+  }
+  const timeCreated =
+    typeof data.timeCreated === 'string'
+      ? data.timeCreated
+      : typeof data.createdAt === 'string'
+        ? data.createdAt
+        : ''
 
   return {
     id: id || fallbackId || 'unknown',
@@ -607,13 +786,16 @@ export function parseDispatchSnapshot(
           ? data.queueToken
           : '(none)',
     pickupCode:
-      typeof data.pickupCode === 'string' ? data.pickupCode : '(none)',
-    archived:
-      data.archived === true ||
-      (typeof data.archivedAt === 'string' && Boolean(data.archivedAt)) ||
-      (typeof data.timeArchived === 'string' && Boolean(data.timeArchived)),
+      readNonEmptyString(data, 'pickupCode', 'pickup_code') || '(none)',
+    archived,
     itemCount: typeof data.itemCount === 'number' ? data.itemCount : lineItemCodes.length,
     lineItemCodes,
+    lineItemStatuses: lineStatuses,
+    deliveryPort,
+    displayNote: displayNote || undefined,
+    temperature: temperature || undefined,
+    milk: milk || undefined,
+    timeCreated: timeCreated || undefined,
   }
 }
 
@@ -750,7 +932,10 @@ export function buildDispatchBody(item: PodItemOption, options?: {
     lang: options?.lang || 'en',
     itemCount: qty,
     channel: options?.channel || 'mobile',
-    deliveryPort: options?.deliveryPort ?? 1,
+    deliveryPort:
+      options?.deliveryPort === 2 || options?.deliveryPort === 1
+        ? options.deliveryPort
+        : 1,
     lineItems: [
       {
         qty,
@@ -819,7 +1004,6 @@ export function applyItemToDispatchBody(body: string, item: PodItemOption) {
 
   if (!parsed.lang) parsed.lang = 'en'
   if (!parsed.channel) parsed.channel = 'mobile'
-  if (typeof parsed.deliveryPort !== 'number') parsed.deliveryPort = 1
 
   return JSON.stringify(parsed, null, 2)
 }

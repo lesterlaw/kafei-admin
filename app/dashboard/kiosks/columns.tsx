@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Pencil, Trash2 } from 'lucide-react'
 import { deleteKiosk } from '@/app/actions/kiosks'
+import { KioskBlockButton } from '@/components/kiosk-block-button'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -51,6 +52,12 @@ const KioskActions = ({ kiosk }: { kiosk: Kiosk }) => {
           <EditKioskForm kiosk={kiosk} />
         </DialogContent>
       </Dialog>
+
+      <KioskBlockButton
+        kioskId={kiosk.id}
+        isActive={kiosk.is_active}
+        kioskName={kiosk.name}
+      />
 
       <AlertDialog>
         <AlertDialogTrigger asChild>
@@ -105,9 +112,20 @@ export const kioskColumns: ColumnDef<Kiosk>[] = [
     header: 'Status',
     cell: ({ row }) => {
       return (
-        <Badge variant={row.getValue('is_active') ? 'default' : 'secondary'}>
-          {row.getValue('is_active') ? 'Active' : 'Inactive'}
+        <Badge variant={row.getValue('is_active') ? 'default' : 'destructive'}>
+          {row.getValue('is_active') ? 'Active' : 'Blocked'}
         </Badge>
+      )
+    },
+  },
+  {
+    accessorKey: 'has_device_token',
+    header: 'Kiosk APK',
+    cell: ({ row }) => {
+      return row.original.has_device_token ? (
+        <Badge>Paired</Badge>
+      ) : (
+        <Badge variant="secondary">No token</Badge>
       )
     },
   },

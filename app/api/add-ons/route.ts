@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { createApiResponse, createApiError, authenticateRequest } from '@/lib/api/middleware'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 
 export async function GET(request: NextRequest) {
   try {
@@ -9,10 +9,11 @@ export async function GET(request: NextRequest) {
       return createApiError('Unauthorized', 401)
     }
 
-    const supabase = await createServerSupabaseClient()
+    const productId = request.nextUrl.searchParams.get('productId')?.trim() || ''
+    const supabase = createAdminClient()
     const { data, error } = await supabase
       .from('add_ons')
-      .select('*')
+      .select('*, product_addons(product_id)')
       .eq('is_hidden', false)
       .order('name', { ascending: true })
 
@@ -20,7 +21,29 @@ export async function GET(request: NextRequest) {
       return createApiError(error.message, 500)
     }
 
-    return createApiResponse(data || [])
+    const rows = data || []
+    if (!productId) {
+      return createApiResponse(
+        rows.map(({ product_addons: _links, ...addon }) => addon)
+      )
+    }
+
+    const taggedForProduct = rows.filter((row) => {
+      const links = Array.isArray(row.product_addons) ? row.product_addons : []
+      return links.some((link: { product_id: string }) => link.product_id === productId)
+    })
+
+    // Product-specific tags win. Untagged catalog stays global so existing drinks keep working.
+    const visible = taggedForProduct.length > 0
+      ? taggedForProduct
+      : rows.filter((row) => {
+          const links = Array.isArray(row.product_addons) ? row.product_addons : []
+          return links.length === 0
+        })
+
+    return createApiResponse(
+      visible.map(({ product_addons: _links, ...addon }) => addon)
+    )
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Internal server error'
     return createApiError(message, 500)

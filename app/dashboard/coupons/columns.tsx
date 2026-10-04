@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Trash2 } from 'lucide-react'
 import { deleteCoupon } from '@/app/actions/coupons'
+import { formatSingaporeDate, formatSingaporeDateTime } from '@/lib/datetime'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -70,14 +71,14 @@ export const couponColumns: ColumnDef<any>[] = [
     accessorKey: 'expires_at',
     header: 'Expires At',
     cell: ({ row }) => {
-      return new Date(row.getValue('expires_at')).toLocaleString()
+      return formatSingaporeDateTime(row.getValue('expires_at') as string)
     },
   },
   {
     accessorKey: 'created_at',
     header: 'Created At',
     cell: ({ row }) => {
-      return new Date(row.getValue('created_at')).toLocaleDateString()
+      return formatSingaporeDate(row.getValue('created_at') as string)
     },
   },
   {

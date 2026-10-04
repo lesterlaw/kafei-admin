@@ -2,6 +2,7 @@
 
 import { ColumnDef } from '@tanstack/react-table'
 import { Badge } from '@/components/ui/badge'
+import { formatSingaporeDateTime } from '@/lib/datetime'
 
 export const transactionColumns: ColumnDef<any>[] = [
   {
@@ -46,7 +47,7 @@ export const transactionColumns: ColumnDef<any>[] = [
     accessorKey: 'created_at',
     header: 'Date',
     cell: ({ row }) => {
-      return new Date(row.getValue('created_at')).toLocaleString()
+      return formatSingaporeDateTime(row.getValue('created_at') as string)
     },
   },
 ]

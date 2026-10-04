@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Pencil, Trash2 } from 'lucide-react'
 import Link from 'next/link'
 import { deleteTicket, updateTicketStatus } from '@/app/actions/support'
+import { formatSingaporeDate } from '@/lib/datetime'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -138,8 +139,7 @@ export const ticketColumns: ColumnDef<any>[] = [
     cell: ({ row }) => {
       const value = row.getValue('created_at')
       if (!value) return '—'
-      const date = new Date(String(value))
-      return Number.isNaN(date.getTime()) ? '—' : date.toLocaleDateString()
+      return formatSingaporeDate(String(value))
     },
   },
   {

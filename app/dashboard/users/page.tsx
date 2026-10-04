@@ -59,6 +59,7 @@ export default async function UsersPage() {
         columns={userColumns}
         data={users}
         searchKey="email"
+        exportFilename="users"
         rowHrefBase="/dashboard/users"
       />
     </div>

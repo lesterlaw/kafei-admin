@@ -1,6 +1,11 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { createApiResponse, createApiError, authenticateRequest } from '@/lib/api/middleware'
 import { createAdminClient } from '@/lib/supabase/admin'
+import {
+  grantWelcomeIfNeeded,
+  InvalidReferralCodeError,
+  recordReferralAtSignup,
+} from '@/lib/product-logic'
 
 // GET - Get current user profile
 export async function GET(request: NextRequest) {
@@ -39,6 +44,18 @@ export async function PUT(request: NextRequest) {
 
     const adminClient = createAdminClient()
 
+    if (typeof referral_code_used === 'string' && referral_code_used.trim()) {
+      try {
+        await recordReferralAtSignup(adminClient, user.id, referral_code_used)
+      } catch (err) {
+        if (err instanceof InvalidReferralCodeError) {
+          return createApiError(err.message, 400)
+        }
+        console.error('[auth/me] referral record failed', err)
+        return createApiError('Unable to apply this referral code', 400)
+      }
+    }
+
     // Build update object with only provided fields
     const updateData: Record<string, any> = {
       updated_at: new Date().toISOString(),
@@ -52,18 +69,8 @@ export async function PUT(request: NextRequest) {
       updateData.email = email
     }
 
-    if (referral_code_used) {
-      try {
-        const { recordReferralAtSignup } = await import('@/lib/product-logic')
-        await recordReferralAtSignup(adminClient, user.id, String(referral_code_used))
-      } catch (err) {
-        console.error('[auth/me] referral record failed', err)
-      }
-    }
-
     // Grant welcome drink + beans on first profile completion
     try {
-      const { grantWelcomeIfNeeded } = await import('@/lib/product-logic')
       await grantWelcomeIfNeeded(adminClient, user.id)
     } catch (err) {
       console.error('[auth/me] welcome grant failed', err)

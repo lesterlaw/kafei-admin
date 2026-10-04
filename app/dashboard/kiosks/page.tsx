@@ -2,7 +2,8 @@ import { getKiosks } from '@/app/actions/data'
 import { DataTable } from '@/components/tables/data-table'
 import { kioskColumns } from './columns'
 import { Button } from '@/components/ui/button'
-import { Plus } from 'lucide-react'
+import { Download, Plus } from 'lucide-react'
+import { KIOSK_APK_PAGE_PATH, KIOSK_APK_VERSION } from '@/lib/kiosk/apk'
 import {
   Dialog,
   DialogContent,
@@ -29,6 +30,12 @@ export default async function KiosksPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Button asChild variant="outline">
+            <a href={KIOSK_APK_PAGE_PATH} target="_blank" rel="noreferrer">
+              <Download className="mr-2 h-4 w-4" />
+              Download APK {KIOSK_APK_VERSION}
+            </a>
+          </Button>
           <CofeplusSyncButton defaultEnvironment={environment} />
           <Dialog>
             <DialogTrigger asChild>
@@ -50,7 +57,13 @@ export default async function KiosksPage() {
         </div>
       </div>
 
-      <DataTable columns={kioskColumns} data={kiosks} searchKey="name" />
+      <DataTable
+        columns={kioskColumns}
+        data={kiosks}
+        searchKey="name"
+        exportFilename="kiosks"
+        rowHrefBase="/dashboard/kiosks"
+      />
     </div>
   )
 }

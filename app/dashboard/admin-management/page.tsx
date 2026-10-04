@@ -47,7 +47,11 @@ export default async function AdminManagementPage() {
           )}
         </div>
 
-        <DataTable columns={adminColumns} data={admins} />
+        <DataTable
+          columns={adminColumns}
+          data={admins}
+          exportFilename="admins"
+        />
       </div>
     )
   } catch (error: any) {

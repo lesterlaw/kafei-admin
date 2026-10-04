@@ -15,7 +15,12 @@ export default async function CouponRedemptionHistoryPage() {
         </p>
       </div>
 
-      <DataTable columns={couponColumns} data={redeemedCoupons} searchKey="code" />
+      <DataTable
+        columns={couponColumns}
+        data={redeemedCoupons}
+        searchKey="code"
+        exportFilename="coupon-redemptions"
+      />
     </div>
   )
 }

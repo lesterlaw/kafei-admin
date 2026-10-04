@@ -2,8 +2,10 @@ import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import { getOrderById } from '@/app/actions/orders'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { formatSingaporeDateTime } from '@/lib/datetime'
 import { Button } from '@/components/ui/button'
 import { OrderStatusSelect } from '../order-status-select'
+import { ResetScanButton } from '../reset-scan-button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Table,
@@ -21,17 +23,6 @@ function formatMoney(amount: number | null | undefined) {
     return '—'
   }
   return `$${Number(amount).toFixed(2)}`
-}
-
-function formatDateTime(value: string | null | undefined) {
-  if (!value) {
-    return '—'
-  }
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    return '—'
-  }
-  return date.toLocaleString()
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -170,12 +161,15 @@ export default async function OrderDetailPage({
               <div>
                 <p className="text-sm text-muted-foreground">Date and time</p>
                 <p className="font-medium">
-                  {formatDateTime(text(order.created_at))}
+                  {formatSingaporeDateTime(text(order.created_at))}
                 </p>
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Status</p>
                 <OrderStatusSelect orderId={id} status={status} />
+                {status !== 'completed' ? (
+                  <ResetScanButton orderId={id} className="mt-2" />
+                ) : null}
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Amount</p>

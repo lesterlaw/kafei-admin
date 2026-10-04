@@ -153,6 +153,7 @@ export default async function RewardsReferralsPage() {
             data={referrals}
             searchKey="referral_code"
             searchPlaceholder="Search referrals..."
+            exportFilename="referral-ledger"
           />
         </CardContent>
       </Card>

@@ -28,7 +28,12 @@ export default async function CouponsPage() {
         </div>
       </div>
 
-      <DataTable columns={couponColumns} data={coupons} searchKey="code" />
+      <DataTable
+        columns={couponColumns}
+        data={coupons}
+        searchKey="code"
+        exportFilename="coupons"
+      />
     </div>
   )
 }

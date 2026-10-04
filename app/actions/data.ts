@@ -92,14 +92,24 @@ export async function getKiosks() {
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from('kiosks')
-    .select('*')
+    .select('*, kiosk_devices(device_token, last_seen_at)')
     .order('created_at', { ascending: false })
 
   if (error) {
     throw new Error(error.message)
   }
 
-  return data || []
+  return (data || []).map((row) => {
+    const device = Array.isArray(row.kiosk_devices)
+      ? row.kiosk_devices[0]
+      : row.kiosk_devices
+    const { kiosk_devices: _devices, ...kiosk } = row
+    return {
+      ...kiosk,
+      has_device_token: Boolean(device?.device_token),
+      device_last_seen_at: device?.last_seen_at || null,
+    }
+  })
 }
 
 export async function getTransactions() {

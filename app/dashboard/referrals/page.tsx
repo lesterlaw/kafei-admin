@@ -32,6 +32,7 @@ export default async function ReferralsPage() {
             data={referrals}
             searchKey="referral_code"
             searchPlaceholder="Search referrer, referred, or code..."
+            exportFilename="referrals"
             rowHrefBase="/dashboard/users"
             rowHrefIdKey="referred_id"
           />

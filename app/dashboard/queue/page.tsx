@@ -1,29 +1,32 @@
-import { getMachineQueueLanes } from '@/app/actions/queue'
+import { getCofeplusLiveLanes, getMachineQueueLanes } from '@/app/actions/queue'
 import { QueueBoard } from './queue-board'
 
 export const dynamic = 'force-dynamic'
 
 export default async function QueuePage() {
-  const lanes = await getMachineQueueLanes()
+  const [lanes, liveLanes] = await Promise.all([
+    getMachineQueueLanes(),
+    getCofeplusLiveLanes(),
+  ])
   const waiting = lanes.reduce((sum, lane) => sum + lane.waiting.length, 0)
   const serving = lanes.reduce((sum, lane) => sum + lane.serving.length, 0)
+  const liveCount = liveLanes.reduce((sum, lane) => sum + lane.items.length, 0)
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold">Machine queue</h1>
+        <h1 className="text-3xl font-bold">Live queue</h1>
         <p className="text-muted-foreground">
-          Who is at the machine and who is waiting. Updates every 8 seconds.
-          After a QR scan we poll CofePlus{' '}
-          <code>GET /dispatches/{'{podId}'}/{'{orderId}'}</code>. Skip queue
-          uses <code>mode=immediate</code> so the machine brews without waiting
-          for a scan.
+          Kafei serving / waiting, plus the CofePlus live dispatch list for
+          each pod. The kiosk APK scans a Kafei QR, then admin starts
+          mode=immediate. Updates every 8 seconds.
           {serving + waiting > 0
-            ? ` ${serving} serving · ${waiting} waiting.`
+            ? ` Kafei ${serving} serving · ${waiting} waiting.`
             : ''}
+          {liveCount > 0 ? ` CofePlus ${liveCount} live.` : ''}
         </p>
       </div>
-      <QueueBoard lanes={lanes} />
+      <QueueBoard lanes={lanes} liveLanes={liveLanes} />
     </div>
   )
 }

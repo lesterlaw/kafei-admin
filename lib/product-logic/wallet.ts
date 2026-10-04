@@ -70,7 +70,11 @@ export async function resolveMembership(
   adminClient: SupabaseClient,
   userId: string
 ): Promise<{ membership: MembershipState; wallet: UserWalletRow }> {
-  const wallet = await ensureWallet(adminClient, userId)
+  const wallet = await syncWelcomeDrinkAvailability(
+    adminClient,
+    userId,
+    await ensureWallet(adminClient, userId)
+  )
   const now = Date.now()
 
   // Activate pending pass if active expired
@@ -288,9 +292,14 @@ export async function grantWelcomeIfNeeded(
 ) {
   const wallet = await ensureWallet(adminClient, userId)
   if (wallet.welcome_beans_granted) {
-    return wallet
+    const synced = await syncWelcomeDrinkAvailability(adminClient, userId, wallet)
+    if (synced.welcome_drink_available) {
+      await assignWelcomeDrinkPromo(adminClient, userId)
+    }
+    return synced
   }
 
+  const alreadyUsed = await hasUsedWelcomeDrink(adminClient, userId)
   const settings = await getProductLogicSettings(adminClient)
   await grantBeans(
     adminClient,
@@ -300,25 +309,136 @@ export async function grantWelcomeIfNeeded(
     true
   )
 
-  await assignWelcomeDrinkPromo(adminClient, userId)
+  if (!alreadyUsed) {
+    await assignWelcomeDrinkPromo(adminClient, userId)
+  }
 
   const { data } = await adminClient
     .from('user_wallets')
     .update({
       welcome_beans_granted: true,
-      welcome_drink_available: true,
+      welcome_drink_available: !alreadyUsed,
       updated_at: new Date().toISOString(),
     })
     .eq('user_id', userId)
     .select('*')
     .single()
 
-  return (data as UserWalletRow) || wallet
+  return (data as UserWalletRow) || { ...wallet, welcome_drink_available: !alreadyUsed }
+}
+
+export async function hasUsedWelcomeDrink(
+  adminClient: SupabaseClient,
+  userId: string
+): Promise<boolean> {
+  const { data: wallet } = await adminClient
+    .from('user_wallets')
+    .select('welcome_drink_available')
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  if (wallet?.welcome_drink_available === false) {
+    return true
+  }
+
+  const { data: order } = await adminClient
+    .from('orders')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('entitlement_type', 'welcome')
+    .neq('status', 'cancelled')
+    .limit(1)
+    .maybeSingle()
+
+  if (order) return true
+
+  const { data: promo } = await adminClient
+    .from('promo_codes')
+    .select('id')
+    .eq('code', WELCOME_PROMO_CODE)
+    .maybeSingle()
+
+  if (!promo?.id) return false
+
+  const { data: promoOrder } = await adminClient
+    .from('orders')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('coupon_id', promo.id)
+    .neq('status', 'cancelled')
+    .limit(1)
+    .maybeSingle()
+
+  return Boolean(promoOrder)
+}
+
+export async function isWelcomeDrinkAvailable(
+  adminClient: SupabaseClient,
+  userId: string
+): Promise<boolean> {
+  return !(await hasUsedWelcomeDrink(adminClient, userId))
+}
+
+export async function syncWelcomeDrinkAvailability(
+  adminClient: SupabaseClient,
+  userId: string,
+  wallet: UserWalletRow
+): Promise<UserWalletRow> {
+  if (!wallet.welcome_drink_available) {
+    return wallet
+  }
+
+  const { data: order } = await adminClient
+    .from('orders')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('entitlement_type', 'welcome')
+    .neq('status', 'cancelled')
+    .limit(1)
+    .maybeSingle()
+
+  if (order) {
+    await markWelcomeUsed()
+    return { ...wallet, welcome_drink_available: false }
+  }
+
+  const { data: promo } = await adminClient
+    .from('promo_codes')
+    .select('id')
+    .eq('code', WELCOME_PROMO_CODE)
+    .maybeSingle()
+
+  if (promo?.id) {
+    const { data: promoOrder } = await adminClient
+      .from('orders')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('coupon_id', promo.id)
+      .neq('status', 'cancelled')
+      .limit(1)
+      .maybeSingle()
+    if (promoOrder) {
+      await markWelcomeUsed()
+      return { ...wallet, welcome_drink_available: false }
+    }
+  }
+
+  return wallet
+
+  async function markWelcomeUsed() {
+    await adminClient
+      .from('user_wallets')
+      .update({
+        welcome_drink_available: false,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('user_id', userId)
+  }
 }
 
 export const WELCOME_PROMO_CODE = 'WELCOME1'
 
-async function assignWelcomeDrinkPromo(
+export async function assignWelcomeDrinkPromo(
   adminClient: SupabaseClient,
   userId: string
 ) {

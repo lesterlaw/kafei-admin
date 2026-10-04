@@ -3,7 +3,7 @@ import {
   isDispatchArchivedError,
   parseCreateDispatch,
   parseDispatchSnapshot,
-  selectModifiersFromGroups,
+  resolveDispatchModifiers,
   type CreateDispatchResult,
   type DispatchSnapshot,
   type PodItemOption,
@@ -22,15 +22,32 @@ export interface CreatePickupDispatchInput {
   deliveryPort?: number
   modifierPreferences?: Record<string, string>
   /**
-   * pickup = wait for QR scan, then brew (default).
-   * immediate = skip pickup / skip the machine queue and start fulfillment now.
+   * pickup is unused for live customer orders (Kafei now mints its own QR).
+   * immediate = start brewing after the kiosk APK scan.
    */
   mode?: 'pickup' | 'immediate'
   adminClient?: SupabaseClient
+  /** Same key + same body replays the first CofePlus success (stops double-brew). */
+  idempotencyKey?: string
 }
+
+const DISPATCH_LOCK_PREFIX = 'pending:'
 
 export function isSimulatedDispatchId(dispatchId: string | null | undefined) {
   return Boolean(dispatchId?.startsWith('sim-'))
+}
+
+export function isInFlightDispatchLock(dispatchId: string | null | undefined) {
+  return Boolean(dispatchId?.startsWith(DISPATCH_LOCK_PREFIX))
+}
+
+export function dispatchLockIdForOrder(orderId: string) {
+  return `${DISPATCH_LOCK_PREFIX}${orderId}`
+}
+
+/** Placeholders that must not be fetched from CofePlus */
+export function isLocalDispatchId(dispatchId: string | null | undefined) {
+  return isSimulatedDispatchId(dispatchId) || isInFlightDispatchLock(dispatchId)
 }
 
 export interface CreatePickupDispatchResult {
@@ -135,20 +152,29 @@ export async function createPickupDispatch(
     }
   }
 
-  const modifiers = input.modifierPreferences
-    ? selectModifiersFromGroups(
-        loaded.item.modifierGroups,
-        input.modifierPreferences
-      )
-    : loaded.item.modifiers
+  const modifiers = resolveDispatchModifiers(
+    loaded.item,
+    input.modifierPreferences || {}
+  )
+
+  // CofePlus rejects create without an integer deliveryPort.
+  const lockedPort =
+    input.deliveryPort === 2 || input.deliveryPort === 1
+      ? input.deliveryPort
+      : 1
 
   const body = buildDispatchBody(loaded.item, {
     lang: 'en',
     channel: 'mobile',
-    deliveryPort: input.deliveryPort === 2 ? 2 : 1,
+    deliveryPort: lockedPort,
     displayNote: input.displayNote || loaded.item.display,
     modifiers,
   })
+
+  const headers: Record<string, string> = {}
+  if (input.idempotencyKey?.trim()) {
+    headers['Idempotency-Key'] = input.idempotencyKey.trim()
+  }
 
   const response = await executeCofeplusRequest({
     method: 'POST',
@@ -156,6 +182,7 @@ export async function createPickupDispatch(
     query: { mode },
     body,
     environment,
+    headers: Object.keys(headers).length > 0 ? headers : undefined,
   })
 
   if (!response.ok) {
@@ -280,6 +307,57 @@ function completedSnapshot(
     archived: true,
     itemCount: partial?.itemCount ?? 0,
     lineItemCodes: partial?.lineItemCodes || [],
+    lineItemStatuses: partial?.lineItemStatuses || [],
+  }
+}
+
+type ArchiveLookup = {
+  status: number
+  message: string
+  snapshot: DispatchSnapshot | null
+}
+
+function archiveErrorMessage(status: number, body: string) {
+  try {
+    const parsed = JSON.parse(body) as { message?: string; error?: string }
+    if (parsed.message) return String(parsed.message)
+    if (parsed.error) return String(parsed.error)
+  } catch {
+    // keep raw fallback
+  }
+  const trimmed = body.trim()
+  return trimmed ? trimmed.slice(0, 80) : `http-${status}`
+}
+
+async function lookupArchivedOrder(
+  podId: string,
+  dispatchId: string,
+  environment: CofeplusEnvironment
+): Promise<ArchiveLookup> {
+  const archived = await executeCofeplusRequest({
+    method: 'GET',
+    path: `/partner/v1/pods/${encodeURIComponent(podId)}/orders/${encodeURIComponent(dispatchId)}`,
+    environment,
+  })
+  if (!archived.ok) {
+    return {
+      status: archived.status,
+      message: archiveErrorMessage(archived.status, archived.body),
+      snapshot: null,
+    }
+  }
+  try {
+    return {
+      status: archived.status,
+      message: 'ok',
+      snapshot: parseDispatchSnapshot(archived.body, dispatchId),
+    }
+  } catch {
+    return {
+      status: archived.status,
+      message: 'parse-error',
+      snapshot: completedSnapshot(dispatchId),
+    }
   }
 }
 
@@ -288,26 +366,65 @@ async function fetchArchivedOrderSnapshot(
   dispatchId: string,
   environment: CofeplusEnvironment
 ): Promise<DispatchSnapshot | null> {
-  const archived = await executeCofeplusRequest({
-    method: 'GET',
-    path: `/partner/v1/pods/${encodeURIComponent(podId)}/orders/${encodeURIComponent(dispatchId)}`,
-    environment,
-  })
-  if (!archived.ok) {
-    return null
-  }
-  try {
-    return completedSnapshot(
-      dispatchId,
-      parseDispatchSnapshot(archived.body, dispatchId)
-    )
-  } catch {
-    return completedSnapshot(dispatchId)
-  }
+  const lookup = await lookupArchivedOrder(podId, dispatchId, environment)
+  return lookup.snapshot
+}
+
+function logStatusEvidence(input: {
+  podId: string
+  dispatchId: string
+  environment: CofeplusEnvironment
+  getById: string
+  liveState: string
+  liveArchived: boolean
+  lineStatuses: string[]
+  archive: string
+  liveList: string
+}) {
+  const states = [input.liveState, ...input.lineStatuses].map((value) =>
+    value.trim().toLowerCase()
+  )
+  const onlyAccepted =
+    states.length > 0 &&
+    states.every((state) => state === 'accepted' || state === 'pending')
+  console.log(
+    [
+      '[cofeplus] status-evidence',
+      `dispatch=${input.dispatchId}`,
+      `pod=${input.podId}`,
+      `env=${input.environment}`,
+      `getById=${input.getById}`,
+      `state=${input.liveState}`,
+      `archived=${input.liveArchived}`,
+      `lines=${input.lineStatuses.join('+') || 'none'}`,
+      `archive=${input.archive}`,
+      `liveList=${input.liveList}`,
+      `onlyAccepted=${onlyAccepted}`,
+    ].join(' ')
+  )
 }
 
 function isTerminalDispatchState(state: string) {
-  return state === 'done' || state === 'failed' || state === 'collected'
+  const normalized = state.trim().toLowerCase()
+  return (
+    normalized === 'done' ||
+    normalized === 'failed' ||
+    normalized === 'collected' ||
+    normalized === 'completed' ||
+    normalized === 'complete'
+  )
+}
+
+function isCollectedHistory(snapshot: DispatchSnapshot) {
+  return snapshot.archived || isTerminalDispatchState(snapshot.state)
+}
+
+/** History rows often keep state=making after the cup is taken. */
+function asCollectedSnapshot(
+  dispatchId: string,
+  partial?: Partial<DispatchSnapshot>
+): DispatchSnapshot {
+  return completedSnapshot(dispatchId, partial)
 }
 
 async function resolveArchivedSnapshot(
@@ -320,7 +437,9 @@ async function resolveArchivedSnapshot(
     dispatchId,
     environment
   )
-  return archived || completedSnapshot(dispatchId)
+  return archived
+    ? asCollectedSnapshot(dispatchId, archived)
+    : completedSnapshot(dispatchId)
 }
 
 export async function fetchDispatchSnapshot(
@@ -355,6 +474,17 @@ export async function fetchDispatchSnapshot(
       environment
     )
     if (archived) {
+      // pending + 404 can be a create delay — keep the live-looking row.
+      // brewing/ready + gone means collected even if history still says making.
+      if (
+        completeIfMissing ||
+        isCollectedHistory(archived)
+      ) {
+        return {
+          ok: true,
+          snapshot: asCollectedSnapshot(dispatchId, archived),
+        }
+      }
       return { ok: true, snapshot: archived }
     }
 
@@ -388,10 +518,55 @@ export async function fetchDispatchSnapshot(
         return { ok: true, snapshot }
       }
 
+      // Pending QR polls must stay fast. Extra archive/list calls here
+      // were blowing the 25s Vercel budget and 504ing before pickup_code
+      // reached the app (JSON parse error on "An error occurred...").
+      if (!completeIfMissing) {
+        return { ok: true, snapshot }
+      }
+
+      // GET-by-id often stays on "making" after the cup is taken. Archived
+      // history is the source of truth once CofePlus has collected it.
+      const archivedLookup = await lookupArchivedOrder(
+        podId,
+        dispatchId,
+        environment
+      )
+      const archived = archivedLookup.snapshot
+      if (archived && isCollectedHistory(archived)) {
+        console.log(
+          `[cofeplus] dispatch ${dispatchId} live state=${snapshot.state}; archived ${archived.state}`
+        )
+        return {
+          ok: true,
+          snapshot: asCollectedSnapshot(dispatchId, archived),
+        }
+      }
+
       // Docs: list live dispatches never includes archived orders.
       // A stale GET-by-id can still return making after collection.
       const live = await listLiveDispatchesResult(podId, environment)
-      if (live.ok && !live.items.some((entry) => entry.id === dispatchId)) {
+      const liveMatch = live.ok
+        ? live.items.find((entry) => entry.id === dispatchId)
+        : undefined
+      logStatusEvidence({
+        podId,
+        dispatchId,
+        environment,
+        getById: `${response.status}:${snapshot.state}`,
+        liveState: snapshot.state,
+        liveArchived: snapshot.archived,
+        lineStatuses: snapshot.lineItemStatuses || [],
+        archive: archived
+          ? `${archivedLookup.status}:${archived.state}`
+          : `${archivedLookup.status}:${archivedLookup.message}`,
+        liveList: !live.ok
+          ? `error:${live.status ?? '?'}`
+          : liveMatch
+            ? `present:${liveMatch.state}`
+            : 'absent',
+      })
+      if (completeIfMissing && live.ok && !liveMatch) {
         return {
           ok: true,
           snapshot: await resolveArchivedSnapshot(podId, dispatchId, environment),

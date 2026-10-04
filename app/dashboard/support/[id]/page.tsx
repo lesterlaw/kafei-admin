@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import { getSupportTicketById } from '@/app/actions/support'
+import { formatSingaporeDateTime } from '@/lib/datetime'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -54,7 +55,7 @@ export default async function SupportTicketDetailPage({
             <div>
               <p className="text-sm text-muted-foreground">Created</p>
               <p className="font-medium">
-                {new Date(ticket.created_at).toLocaleString()}
+                {formatSingaporeDateTime(ticket.created_at)}
               </p>
             </div>
             <div>

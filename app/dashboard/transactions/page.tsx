@@ -22,6 +22,7 @@ export default async function TransactionsPage() {
         columns={transactionColumns}
         data={transactions}
         searchKey="id"
+        exportFilename="transactions"
       />
     </div>
   )

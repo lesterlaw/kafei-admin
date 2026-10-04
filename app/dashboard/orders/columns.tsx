@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Pencil, Trash2 } from 'lucide-react'
 import Link from 'next/link'
 import { deleteOrder } from '@/app/actions/orders'
+import { formatSingaporeDate } from '@/lib/datetime'
 import { OrderStatusSelect } from './order-status-select'
 import {
   AlertDialog,
@@ -129,8 +130,7 @@ export const orderColumns: ColumnDef<any>[] = [
     cell: ({ row }) => {
       const value = row.getValue('created_at')
       if (!value) return '—'
-      const date = new Date(String(value))
-      return Number.isNaN(date.getTime()) ? '—' : date.toLocaleDateString()
+      return formatSingaporeDate(String(value))
     },
   },
   {
