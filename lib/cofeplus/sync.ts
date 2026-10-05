@@ -3,6 +3,7 @@ import {
   podAccessHint,
   type CofeplusEnvironment,
 } from '@/lib/cofeplus/config'
+import { LATTE_ART_GROUP } from '@/lib/cofeplus/latte-art-contract'
 import { executeCofeplusRequest } from '@/lib/cofeplus/proxy'
 import {
   mergeModifiersFromItems,
@@ -137,6 +138,55 @@ export async function loadSyncedPodItem(
   }
   if (!data) return null
   return podItemFromCacheRow(data)
+}
+
+/**
+ * Printed latte art only works on the machine items whose menu has a
+ * latte-art group (the starred twins, e.g. "Latte*" for "Latte"). Returns the
+ * item code to dispatch for this art flag, or null when the pod has no
+ * printing version of the drink.
+ */
+export async function findLatteArtItemCode(
+  adminClient: SupabaseClient,
+  podId: string,
+  itemCode: string,
+  environment: CofeplusEnvironment,
+  artFlag: string
+): Promise<string | null> {
+  const { data, error } = await adminClient
+    .from('cofeplus_menu_items')
+    .select('item_code, display, category, price, out_of_stock, modifiers, raw')
+    .eq('environment', environment)
+    .eq('pod_id', podId)
+
+  if (error) {
+    console.error('[cofeplus-sync] findLatteArtItemCode failed', error)
+    return null
+  }
+
+  const items = (data || [])
+    .map((row) => podItemFromCacheRow(row))
+    .filter((item): item is PodItemOption => item !== null)
+  const supportsArt = (item: PodItemOption) =>
+    item.modifierGroups.some(
+      (group) =>
+        group.group === LATTE_ART_GROUP &&
+        group.options.some((option) => option.flag === artFlag)
+    )
+  const baseName = (display: string) =>
+    display.replace(/\*/g, '').trim().toLowerCase().replace(/\s+/g, ' ')
+
+  const current = items.find((item) => item.itemCode === itemCode)
+  if (!current) return null
+  if (supportsArt(current)) return current.itemCode
+
+  const twin = items.find(
+    (item) =>
+      !item.outOfStock &&
+      supportsArt(item) &&
+      baseName(item.display) === baseName(current.display)
+  )
+  return twin?.itemCode ?? null
 }
 
 async function upsertPodsCache(

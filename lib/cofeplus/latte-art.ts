@@ -86,7 +86,8 @@ async function composeSpecJpeg(artwork: Buffer) {
       },
     })
       .composite([{ input: circled, left: offset, top: offset }])
-      .jpeg({ quality, mozjpeg: true })
+      // Baseline JPG: this is the encoding verified to print on the machine.
+      .jpeg({ quality, progressive: false })
       .withMetadata({ density: LATTE_ART_DPI })
       .toBuffer()
 

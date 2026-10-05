@@ -24,6 +24,7 @@ import {
   matchMenuItem,
 } from '@/lib/cofeplus/product-map'
 import { resolveCofeplusEnvironment } from '@/lib/cofeplus/proxy'
+import { findLatteArtItemCode } from '@/lib/cofeplus/sync'
 import {
   dispenseSecondsForEnvironment,
   formatWaitLabel,
@@ -629,6 +630,28 @@ async function loadOrderItemForDispatch(
     )
     if (match) {
       itemCode = match.itemCode
+    }
+  }
+
+  // Printed art is ignored on plain items, so send the printing twin instead.
+  const printedArtFlag = modifierPreferences[LATTE_ART_GROUP]
+  if (itemCode && podId && printedArtFlag) {
+    const artItemCode = await findLatteArtItemCode(
+      adminClient,
+      podId,
+      itemCode,
+      environment,
+      printedArtFlag
+    )
+    if (artItemCode && artItemCode !== itemCode) {
+      console.log(
+        `[queue] latte art order=${orderId} item ${itemCode} -> ${artItemCode}`
+      )
+      itemCode = artItemCode
+    } else if (!artItemCode) {
+      console.warn(
+        `[queue] latte art order=${orderId} item ${itemCode} has no printing version on ${podId}`
+      )
     }
   }
 
