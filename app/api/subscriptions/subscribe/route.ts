@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server'
 import type Stripe from 'stripe'
 import { createApiResponse, createApiError, authenticateRequest } from '@/lib/api/middleware'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { getStripeServer } from '@/lib/stripe/server'
+import { getActiveStripe } from '@/lib/stripe/server'
 import {
   ensureStripeCustomer,
   findRecurringPrice,
@@ -43,8 +43,8 @@ export async function POST(request: NextRequest) {
       return createApiError('Only Monthly or Annual can be purchased', 400)
     }
 
-    const stripe = getStripeServer()
-    const price = await findRecurringPrice(stripe, tier.period)
+    const { stripe, mode, publishableKey } = await getActiveStripe(adminClient)
+    const price = await findRecurringPrice(stripe, tier.period, mode)
 
     const wallet = await ensureWallet(adminClient, user.id)
     const priceCents = price.unit_amount ?? Math.round(Number(tier.price) * 100)
@@ -109,6 +109,8 @@ export async function POST(request: NextRequest) {
       credit_cents: credit,
       requires_payment: true,
       tier_id: tier.id,
+      publishable_key: publishableKey,
+      stripe_mode: mode,
     })
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Internal server error'

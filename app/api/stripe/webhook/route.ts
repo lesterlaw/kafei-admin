@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type Stripe from 'stripe'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { getStripeServer } from '@/lib/stripe/server'
+import { getStripeForMode } from '@/lib/stripe/server'
+import { stripeKeysForMode, type StripeMode } from '@/lib/stripe/mode'
 import {
   invoiceSubscriptionId,
   subscriptionPeriodEnd,
@@ -13,17 +14,34 @@ import {
  * - customer.subscription.deleted: end the plan when Stripe stops billing
  */
 export async function POST(request: NextRequest) {
-  const secret = process.env.STRIPE_WEBHOOK_SECRET
   const signature = request.headers.get('stripe-signature')
-  if (!secret || !signature) {
+  const modes = (['test', 'live'] as StripeMode[]).filter((mode) => {
+    const keys = stripeKeysForMode(mode)
+    return Boolean(keys.secretKey && keys.webhookSecret)
+  })
+  if (!signature || modes.length === 0) {
     return NextResponse.json({ error: 'Webhook not configured' }, { status: 400 })
   }
 
-  const stripe = getStripeServer()
-  let event: Stripe.Event
-  try {
-    event = stripe.webhooks.constructEvent(await request.text(), signature, secret)
-  } catch {
+  // Test and live each have their own endpoint secret: the one that verifies tells us the mode
+  const payload = await request.text()
+  let event: Stripe.Event | null = null
+  let stripe: Stripe | null = null
+  for (const mode of modes) {
+    const candidate = getStripeForMode(mode)
+    try {
+      event = candidate.webhooks.constructEvent(
+        payload,
+        signature,
+        stripeKeysForMode(mode).webhookSecret!
+      )
+      stripe = candidate
+      break
+    } catch {
+      // Try the next mode's secret
+    }
+  }
+  if (!event || !stripe) {
     return NextResponse.json({ error: 'Invalid signature' }, { status: 400 })
   }
 

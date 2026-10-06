@@ -7,9 +7,7 @@ import {
 import { createAdminClient } from '@/lib/supabase/admin'
 import type Stripe from 'stripe'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import {
-  getStripeServer,
-} from '@/lib/stripe/server'
+import { getActiveStripe } from '@/lib/stripe/server'
 import { subscriptionPeriodEnd } from '@/lib/stripe/subscriptions'
 import {
   ensureWallet,
@@ -91,7 +89,7 @@ export async function POST(request: NextRequest) {
     let stripePeriodEnd: Date | null = null
 
     if (stripe_subscription_id) {
-      const stripe = getStripeServer()
+      const { stripe } = await getActiveStripe(adminClient)
       const stripeSubscription = await stripe.subscriptions.retrieve(
         stripe_subscription_id,
         { expand: ['latest_invoice'] }
@@ -147,7 +145,7 @@ export async function POST(request: NextRequest) {
         return createApiError('payment_intent_id is required', 400)
       }
 
-      const stripe = getStripeServer()
+      const { stripe } = await getActiveStripe(adminClient)
       const intent = await stripe.paymentIntents.retrieve(payment_intent_id)
 
       if (intent.status !== 'succeeded') {

@@ -1,32 +1,39 @@
 import type Stripe from 'stripe'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import type { StripeMode } from '@/lib/stripe/mode'
 
 export type PaidPeriod = 'monthly' | 'annual'
 
-// KAFEI membership products on Stripe. Override with env if they are recreated.
-const DEFAULT_PRODUCT_IDS: Record<PaidPeriod, string> = {
+// KAFEI membership products in Stripe test mode. Live products have different
+// ids: set STRIPE_LIVE_MONTHLY_PRODUCT_ID / STRIPE_LIVE_ANNUAL_PRODUCT_ID, or
+// leave them unset to use the account's only price for that billing interval.
+const TEST_PRODUCT_IDS: Record<PaidPeriod, string> = {
   monthly: 'prod_VOBGjOAUI0K532',
   annual: 'prod_VOBGUyNZYktmcs',
 }
 
-export function stripeProductIdForPeriod(period: PaidPeriod): string {
-  const override =
-    period === 'annual'
-      ? process.env.STRIPE_ANNUAL_PRODUCT_ID
-      : process.env.STRIPE_MONTHLY_PRODUCT_ID
-  return override?.trim() || DEFAULT_PRODUCT_IDS[period]
+export function stripeProductIdForPeriod(
+  period: PaidPeriod,
+  mode: StripeMode
+): string | null {
+  const suffix = period === 'annual' ? 'ANNUAL_PRODUCT_ID' : 'MONTHLY_PRODUCT_ID'
+  if (mode === 'live') {
+    return process.env[`STRIPE_LIVE_${suffix}`]?.trim() || null
+  }
+  return process.env[`STRIPE_${suffix}`]?.trim() || TEST_PRODUCT_IDS[period]
 }
 
-/** Active recurring price on the plan's Stripe product that bills once per month / year. */
+/** Active recurring price for the plan that bills once per month / year. */
 export async function findRecurringPrice(
   stripe: Stripe,
-  period: PaidPeriod
+  period: PaidPeriod,
+  mode: StripeMode
 ): Promise<Stripe.Price> {
-  const product = stripeProductIdForPeriod(period)
+  const product = stripeProductIdForPeriod(period, mode)
   const interval = period === 'annual' ? 'year' : 'month'
 
   const prices = await stripe.prices.list({
-    product,
+    ...(product ? { product } : {}),
     active: true,
     type: 'recurring',
     limit: 100,
@@ -42,7 +49,16 @@ export async function findRecurringPrice(
 
   if (matches.length === 0) {
     throw new Error(
-      `Stripe product ${product} has no active ${period} price. Add one in the Stripe dashboard.`
+      product
+        ? `Stripe product ${product} has no active ${period} price. Add one in the Stripe dashboard.`
+        : `No active ${period} price found in Stripe ${mode} mode. Create the plan in the Stripe dashboard.`
+    )
+  }
+
+  // Without a configured product, guessing between several prices could charge the wrong amount
+  if (!product && matches.length > 1) {
+    throw new Error(
+      `Stripe ${mode} mode has several ${period} prices. Set the ${period} product id on the server.`
     )
   }
 

@@ -1,8 +1,17 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { CreditCard } from 'lucide-react'
+import { getStripeModeStatus, type StripeModeStatus } from '@/app/actions/stripe-mode'
+import { StripeModeToggle } from './stripe-mode-toggle'
 
-export default function PaymentsPage() {
+export default async function PaymentsPage() {
+  let status: StripeModeStatus | null = null
+  try {
+    status = await getStripeModeStatus()
+  } catch (error) {
+    console.error('Payments page failed to load Stripe mode:', error)
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -20,6 +29,11 @@ export default function PaymentsPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          {status ? (
+            <div className="border-b pb-4">
+              <StripeModeToggle status={status} />
+            </div>
+          ) : null}
           <div>
             <p className="text-sm text-muted-foreground mb-2">
               Payment Gateway: Stripe

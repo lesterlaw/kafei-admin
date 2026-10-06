@@ -1,7 +1,8 @@
 import { NextRequest } from 'next/server'
 import { createApiResponse, createApiError, authenticateRequest } from '@/lib/api/middleware'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { getStripeServer } from '@/lib/stripe/server'
+import { getStripeForMode } from '@/lib/stripe/server'
+import { getActiveStripeMode, isStripeModeConfigured } from '@/lib/stripe/mode'
 
 /** Turn off auto-renew. The plan stays active until the end of the paid period. */
 export async function POST(request: NextRequest) {
@@ -27,10 +28,21 @@ export async function POST(request: NextRequest) {
       return createApiError('This plan does not auto-renew', 400)
     }
 
-    const stripe = getStripeServer()
-    await stripe.subscriptions.update(subscription.stripe_subscription_id, {
-      cancel_at_period_end: true,
-    })
+    // The plan may have been bought before the admin switched Stripe mode
+    const active = await getActiveStripeMode(adminClient)
+    const other = active === 'live' ? 'test' : 'live'
+    try {
+      await getStripeForMode(active).subscriptions.update(
+        subscription.stripe_subscription_id,
+        { cancel_at_period_end: true }
+      )
+    } catch (error) {
+      if (!isStripeModeConfigured(other)) throw error
+      await getStripeForMode(other).subscriptions.update(
+        subscription.stripe_subscription_id,
+        { cancel_at_period_end: true }
+      )
+    }
 
     const { data: updated, error } = await adminClient
       .from('user_subscriptions')

@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server'
 import { z } from 'zod'
 import { createApiResponse, createApiError, authenticateRequest } from '@/lib/api/middleware'
-import { getStripeServer } from '@/lib/stripe/server'
+import { getActiveStripe } from '@/lib/stripe/server'
 
 const schema = z.object({
   amount: z.number().positive(),
@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
     }
 
     const { amount, currency, order_metadata } = parsed.data
-    const stripe = getStripeServer()
+    const { stripe, mode, publishableKey } = await getActiveStripe()
 
     const paymentIntent = await stripe.paymentIntents.create({
       amount: Math.round(amount * 100),
@@ -45,7 +45,8 @@ export async function POST(request: NextRequest) {
     return createApiResponse({
       client_secret: paymentIntent.client_secret,
       payment_intent_id: paymentIntent.id,
-      publishable_key: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || null,
+      publishable_key: publishableKey,
+      stripe_mode: mode,
     })
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Internal server error'
