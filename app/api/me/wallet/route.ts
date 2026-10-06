@@ -14,6 +14,7 @@ import {
   getOrCreateDailyCoupon,
   isSecondCupEligible,
   getReferralProgress,
+  countUnusedStampCoupons,
 } from '@/lib/product-logic'
 
 export async function GET(request: NextRequest) {
@@ -41,6 +42,9 @@ export async function GET(request: NextRequest) {
     )
     const secondCup = await isSecondCupEligible(adminClient, user.id).catch(
       () => false
+    )
+    const stampCoupons = await countUnusedStampCoupons(adminClient, user.id).catch(
+      () => 0
     )
     const referral = await getReferralProgress(adminClient, user.id).catch(() => ({
       free: {
@@ -102,6 +106,7 @@ export async function GET(request: NextRequest) {
         stamp_count: wallet.stamp_count,
         stamp_cost: settings.stamp_cost,
         stamp_max: settings.stamp_max,
+        stamp_coupons: stampCoupons,
         welcome_drink_available: wallet.welcome_drink_available,
         last_checkin_on: wallet.last_checkin_on,
         can_checkin: canCheckInToday(wallet),

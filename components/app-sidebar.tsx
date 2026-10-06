@@ -21,6 +21,7 @@ import {
   FileText,
   Image,
   Tag,
+  Percent,
   Settings,
   LogOut,
   FlaskConical,
@@ -148,6 +149,11 @@ const navItems = [
         title: 'Banners',
         url: '/dashboard/banners',
         icon: Image,
+      },
+      {
+        title: 'Deals & Promotions',
+        url: '/dashboard/deals',
+        icon: Percent,
       },
       {
         title: 'Subpages',

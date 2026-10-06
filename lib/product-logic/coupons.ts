@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   addDaysIso,
+  getProductLogicSettings,
   singaporeDateString,
   singaporeDayBounds,
 } from '@/lib/product-logic/settings'
@@ -74,7 +75,7 @@ export async function getUnusedRewardCoupons(
     .eq('user_id', userId)
     .eq('is_redeemed', false)
     .gt('expires_at', now)
-    .in('kind', ['welcome', 'referral_drink', 'referral_addon', 'other'])
+    .in('kind', ['welcome', 'referral_drink', 'referral_addon', 'stamp', 'other'])
     .order('granted_at', { ascending: true })
 
   return (data || []).filter((coupon) => {
@@ -82,9 +83,110 @@ export async function getUnusedRewardCoupons(
     if (kind === 'welcome' || kind === 'referral_drink' || kind === 'referral_addon') {
       return true
     }
+    if (isStampCoupon(coupon)) return true
     const code = String(coupon.code || '')
     return code.startsWith('RD-') || code.startsWith('RA-')
   })
+}
+
+const STAMP_COUPON_PREFIX = 'ST'
+const STAMP_COUPON_EXPIRY_DAYS = 90
+
+/** Stamp reward coupon. Falls back to the code prefix when kind was stored as 'other'. */
+export function isStampCoupon(coupon: {
+  kind?: string | null
+  code?: string | null
+}): boolean {
+  return (
+    coupon.kind === 'stamp' ||
+    String(coupon.code || '').startsWith(`${STAMP_COUPON_PREFIX}-`)
+  )
+}
+
+export async function countUnusedStampCoupons(
+  adminClient: SupabaseClient,
+  userId: string
+): Promise<number> {
+  const coupons = await getUnusedRewardCoupons(adminClient, userId)
+  return coupons.filter((coupon) => isStampCoupon(coupon)).length
+}
+
+/**
+ * Spend stamp_cost stamps for one Latte/Americano coupon.
+ * Stamps are deducted right away; the coupon is then picked as a promo code at checkout.
+ */
+export async function redeemStampsForCoupon(
+  adminClient: SupabaseClient,
+  userId: string
+) {
+  const { membership, wallet } = await resolveMembership(adminClient, userId)
+  const settings = await getProductLogicSettings(adminClient)
+
+  if (!membership.collectsStamps) {
+    throw new Error('Stamps are for Free plan and 7-Day Pass only')
+  }
+  if (wallet.stamp_count < settings.stamp_cost) {
+    throw new Error(`Need ${settings.stamp_cost} stamps to redeem`)
+  }
+
+  const remaining = wallet.stamp_count - settings.stamp_cost
+
+  // Guard on the stamp count we read so a double tap cannot spend the same stamps twice
+  const { data: deducted, error: deductError } = await adminClient
+    .from('user_wallets')
+    .update({ stamp_count: remaining, updated_at: new Date().toISOString() })
+    .eq('user_id', userId)
+    .eq('stamp_count', wallet.stamp_count)
+    .select('stamp_count')
+
+  if (deductError) {
+    throw new Error(deductError.message)
+  }
+  if (!deducted || deducted.length === 0) {
+    throw new Error('Your stamps just changed. Please try again.')
+  }
+
+  const row = {
+    user_id: userId,
+    code: couponCode(STAMP_COUPON_PREFIX),
+    expires_at: addDaysIso(STAMP_COUPON_EXPIRY_DAYS),
+    granted_at: new Date().toISOString(),
+  }
+
+  let { data: coupon, error } = await adminClient
+    .from('coupons')
+    .insert({ ...row, kind: 'stamp' })
+    .select('id, code, kind, expires_at')
+    .single()
+
+  if (error) {
+    // Older schema without the 'stamp' kind: the ST- code prefix still identifies it
+    const retry = await adminClient
+      .from('coupons')
+      .insert({ ...row, kind: 'other' })
+      .select('id, code, kind, expires_at')
+      .single()
+    coupon = retry.data
+    error = retry.error
+  }
+
+  if (error || !coupon) {
+    await adminClient
+      .from('user_wallets')
+      .update({
+        stamp_count: wallet.stamp_count,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('user_id', userId)
+      .eq('stamp_count', remaining)
+    throw new Error(error?.message || 'Could not create stamp reward')
+  }
+
+  return {
+    coupon,
+    stamp_count: remaining,
+    stamps_spent: settings.stamp_cost,
+  }
 }
 
 export async function takeUnusedAddonCoupon(

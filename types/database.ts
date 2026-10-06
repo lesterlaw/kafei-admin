@@ -306,6 +306,19 @@ export interface Banner {
   updated_at: string
 }
 
+export interface Deal {
+  id: string
+  title: string
+  /** Limited HTML: p, br, strong, ul, li */
+  description: string
+  image_urls: string[]
+  link_url?: string | null
+  sort_order: number
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
 export type PromoCodeType = 'percent' | 'fixed' | 'nth_cup' | 'referral'
 
 export interface PromoCode {

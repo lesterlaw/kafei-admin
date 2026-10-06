@@ -20,6 +20,7 @@ import {
   hasUsedWelcomeDrink,
   hasUsedPassDrinkToday,
   isCouponReservedOnOpenOrder,
+  isStampCoupon,
 } from '@/lib/product-logic'
 import {
   drinkSupportsLatteArt,
@@ -289,11 +290,12 @@ export async function POST(request: NextRequest) {
     let validatedCouponId: string | null = null
     let appliedAddonCouponId: string | null = null
     let dailyDrinkCouponId: string | null = null
+    let stampCouponId: string | null = null
 
     if (coupon_id) {
       const { data: coupon } = await adminClient
         .from('coupons')
-        .select('id, expires_at, is_redeemed, kind')
+        .select('id, code, expires_at, is_redeemed, kind')
         .eq('id', coupon_id)
         .eq('user_id', user.id)
         .maybeSingle()
@@ -308,7 +310,15 @@ export async function POST(request: NextRequest) {
         }
 
         const kind = String(coupon.kind || '')
-        if (kind === 'referral_addon') {
+        if (isStampCoupon(coupon)) {
+          if (!isLatteOrAmericano(product.name || '')) {
+            return createApiError('Stamp reward is for Latte or Americano only', 400)
+          }
+          total = Math.max(0, Math.round((total - drinkPrice) * 100) / 100)
+          validatedCouponId = coupon.id
+          stampCouponId = coupon.id
+          entitlementType = 'stamp'
+        } else if (kind === 'referral_addon') {
           total = Math.max(0, Math.round((total - addonTotal) * 100) / 100)
           appliedAddonCouponId = coupon.id
         } else if (kind === 'welcome' || kind === 'referral_drink' || kind === 'pass' || kind === 'daily_24h') {
@@ -575,7 +585,8 @@ export async function POST(request: NextRequest) {
         .eq('is_redeemed', false)
     }
 
-    if (dailyDrinkCouponId) {
+    const spentCouponId = dailyDrinkCouponId || stampCouponId
+    if (spentCouponId) {
       await adminClient
         .from('coupons')
         .update({
@@ -583,7 +594,7 @@ export async function POST(request: NextRequest) {
           redeemed_at: new Date().toISOString(),
           order_id: order.id,
         })
-        .eq('id', dailyDrinkCouponId)
+        .eq('id', spentCouponId)
         .eq('is_redeemed', false)
     }
 

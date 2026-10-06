@@ -12,6 +12,7 @@ import {
   getOrCreateDailyCoupon,
   isSecondCupEligible,
   isWelcomeDrinkAvailable,
+  isStampCoupon,
 } from '@/lib/product-logic'
 
 function couponTitle(kind: string, code: string) {
@@ -20,6 +21,7 @@ function couponTitle(kind: string, code: string) {
   if (kind === 'referral_addon') return 'Referral add-on coupon'
   if (kind === 'pass') return '7-Day Pass drink - Latte/Americano'
   if (kind === 'daily_24h') return 'Daily All-Drinks coupon'
+  if (kind === 'stamp' || code.startsWith('ST-')) return 'Stamp reward - Latte/Americano'
   if (code.startsWith('RD-')) return 'Referral drink coupon - Latte/Americano'
   if (code.startsWith('RA-')) return 'Referral add-on coupon'
   return 'Reward coupon'
@@ -109,7 +111,7 @@ export async function GET(request: NextRequest) {
       discount_value: coupon.kind === 'referral_addon' ? 1 : 100,
       is_system: true,
       is_active: true,
-      kind: String(coupon.kind || 'other'),
+      kind: isStampCoupon(coupon) ? 'stamp' : String(coupon.kind || 'other'),
     }))
 
     const dailyCoupon = await getOrCreateDailyCoupon(supabase, user.id).catch(
