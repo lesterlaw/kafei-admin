@@ -3,16 +3,18 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 export type PaidPeriod = 'monthly' | 'annual'
 
-// KAFEI membership product on Stripe. Monthly and Annual are separate recurring
-// prices; override per plan with env if they ever move to different products.
-const DEFAULT_MEMBERSHIP_PRODUCT_ID = 'prod_VOBGUyNZYktmcs'
+// KAFEI membership products on Stripe. Override with env if they are recreated.
+const DEFAULT_PRODUCT_IDS: Record<PaidPeriod, string> = {
+  monthly: 'prod_VOBGjOAUI0K532',
+  annual: 'prod_VOBGUyNZYktmcs',
+}
 
 export function stripeProductIdForPeriod(period: PaidPeriod): string {
   const override =
     period === 'annual'
       ? process.env.STRIPE_ANNUAL_PRODUCT_ID
       : process.env.STRIPE_MONTHLY_PRODUCT_ID
-  return override?.trim() || DEFAULT_MEMBERSHIP_PRODUCT_ID
+  return override?.trim() || DEFAULT_PRODUCT_IDS[period]
 }
 
 /** Active recurring price on the plan's Stripe product that bills once per month / year. */
