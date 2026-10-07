@@ -25,37 +25,58 @@ export interface KioskDrinkView {
   orderNumber: string
   status: string
   drinkName: string
+  /** Product photo for the kiosk screen */
+  drinkImage: string | null
+  /** 'hot' | 'cold' | 'both' */
+  temperature: string | null
   deliveryPort: number | null
   pickupCode: string | null
   alreadyStarted?: boolean
 }
 
-async function loadDrinkName(adminClient: SupabaseClient, orderId: string) {
+interface KioskDrinkInfo {
+  name: string
+  imageUrl: string | null
+  temperature: string | null
+}
+
+async function loadDrinkInfo(
+  adminClient: SupabaseClient,
+  orderId: string
+): Promise<KioskDrinkInfo> {
   const { data } = await adminClient
     .from('order_items')
-    .select('products(name)')
+    .select('products(name, image_url, temperature)')
     .eq('order_id', orderId)
     .limit(1)
     .maybeSingle()
 
-  const raw = data?.products as
-    | { name?: string }
-    | { name?: string }[]
-    | null
+  type ProductRow = {
+    name?: string
+    image_url?: string | null
+    temperature?: string | null
+  }
+  const raw = data?.products as ProductRow | ProductRow[] | null
   const product = Array.isArray(raw) ? raw[0] : raw
-  return product?.name?.trim() || 'Drink'
+  return {
+    name: product?.name?.trim() || 'Drink',
+    imageUrl: product?.image_url || null,
+    temperature: product?.temperature || null,
+  }
 }
 
 function toDrinkView(
   order: MachineOrderRow,
-  drinkName: string,
+  drink: KioskDrinkInfo,
   extra?: { alreadyStarted?: boolean }
 ): KioskDrinkView {
   return {
     orderId: order.id,
     orderNumber: order.order_number || '',
     status: order.status,
-    drinkName,
+    drinkName: drink.name,
+    drinkImage: drink.imageUrl,
+    temperature: drink.temperature,
     deliveryPort:
       order.delivery_port === 1 || order.delivery_port === 2
         ? order.delivery_port
@@ -324,10 +345,10 @@ export async function scanPickupAtKiosk(
     return { ok: false, error: result.error, status: 409 }
   }
 
-  const drinkName = await loadDrinkName(adminClient, result.order.id)
+  const drinkInfo = await loadDrinkInfo(adminClient, result.order.id)
   return {
     ok: true,
-    drink: toDrinkView(result.order, drinkName, {
+    drink: toDrinkView(result.order, drinkInfo, {
       alreadyStarted: result.alreadyStarted,
     }),
   }
@@ -376,7 +397,7 @@ export async function getKioskBoard(
           return rowPort == null || rowPort === boardPort
         })
         .map(async (row) =>
-          toDrinkView(row, await loadDrinkName(adminClient, row.id))
+          toDrinkView(row, await loadDrinkInfo(adminClient, row.id))
         )
     )
   ).sort((a, b) => (a.deliveryPort || 9) - (b.deliveryPort || 9))
@@ -430,6 +451,6 @@ export async function getKioskOrderView(
 
   return {
     ok: true,
-    drink: toDrinkView(synced, await loadDrinkName(adminClient, synced.id)),
+    drink: toDrinkView(synced, await loadDrinkInfo(adminClient, synced.id)),
   }
 }
