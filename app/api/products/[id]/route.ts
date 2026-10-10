@@ -18,6 +18,7 @@ export async function GET(
       .from('products')
       .select('*, product_addons(add_ons(*))')
       .eq('id', id)
+      .eq('is_hidden', false)
       .single()
 
     if (error) {

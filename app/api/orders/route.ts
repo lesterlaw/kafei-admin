@@ -157,7 +157,7 @@ export async function POST(request: NextRequest) {
 
     const { data: product, error: productError } = await adminClient
       .from('products')
-      .select('price, name, temperature, cofeplus_item_code')
+      .select('price, name, temperature, cofeplus_item_code, is_hidden')
       .eq('id', product_id)
       .single()
 
@@ -166,15 +166,24 @@ export async function POST(request: NextRequest) {
       return createApiError('Product not found', 404)
     }
 
+    // Same rule as the menu list: hidden drinks cannot be ordered, even from a stale screen.
+    if (product.is_hidden) {
+      return createApiError('This drink is not available right now', 400)
+    }
+
     const { data: kiosk, error: kioskError } = await adminClient
       .from('kiosks')
-      .select('id, pod_id, name, address')
+      .select('id, pod_id, name, address, is_active')
       .eq('id', kiosk_id)
       .single()
 
     if (kioskError || !kiosk) {
       console.error('Kiosk not found:', kiosk_id, kioskError)
       return createApiError('Kiosk not found', 404)
+    }
+
+    if (!kiosk.is_active) {
+      return createApiError('This kiosk is not taking orders right now', 400)
     }
 
     let latteArtFlag: LatteArtFlag | null = null
@@ -235,12 +244,17 @@ export async function POST(request: NextRequest) {
     if (addons && addons.length > 0) {
       const { data: addonData } = await adminClient
         .from('add_ons')
-        .select('price')
+        .select('id, price')
         .in('id', addons)
+        .eq('is_hidden', false)
 
-      if (addonData) {
-        addonTotal = addonData.reduce((sum, addon) => sum + Number(addon.price), 0)
+      // Every requested add-on must exist and be visible, otherwise it would be dropped from the price silently.
+      const found = new Set((addonData || []).map((addon) => addon.id))
+      if (addons.some((id) => !found.has(id))) {
+        return createApiError('One of the selected add-ons is not available right now', 400)
       }
+
+      addonTotal = (addonData || []).reduce((sum, addon) => sum + Number(addon.price), 0)
     }
 
     let total = drinkPrice + addonTotal
@@ -429,7 +443,9 @@ export async function POST(request: NextRequest) {
         total = Math.max(0, Math.round((total - discount) * 100) / 100)
         validatedCouponId = promo.id
         if (isWelcomePromo) {
-          entitlementType = entitlementType || 'welcome'
+          // Always label welcome orders 'welcome' (never trust the client's label), so the
+          // wallet flag below is cleared and reports count them correctly.
+          entitlementType = 'welcome'
         }
       }
     }
@@ -552,7 +568,7 @@ export async function POST(request: NextRequest) {
         product_id,
         quantity: 1,
         price: product.price,
-        addons: addons ? JSON.stringify(addons) : '[]',
+        addons: addons ?? [],
         latte_art_flag: latteArtFlag,
         latte_art_locator: latteArtLocator,
       })

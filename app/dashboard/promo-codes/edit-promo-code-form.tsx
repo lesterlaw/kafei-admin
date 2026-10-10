@@ -26,14 +26,10 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 import { Trash2 } from 'lucide-react'
+import { toSingaporeDateTimeLocal } from '@/lib/datetime'
 
-function toDatetimeLocal(value?: string | null) {
-  if (!value) return ''
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return ''
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
+// Show stored times in Singapore time, matching how the server parses them on save.
+const toDatetimeLocal = toSingaporeDateTimeLocal
 
 export function EditPromoCodeForm({
   promoCode,

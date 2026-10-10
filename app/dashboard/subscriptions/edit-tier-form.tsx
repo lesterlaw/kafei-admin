@@ -100,9 +100,9 @@ export function EditSubscriptionTierForm({ tier }: { tier: SubscriptionTier }) {
             <SelectValue placeholder="Select period" />
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value="free">Free</SelectItem>
             <SelectItem value="monthly">Monthly</SelectItem>
             <SelectItem value="annual">Annual</SelectItem>
-            <SelectItem value="3year">3 Years</SelectItem>
           </SelectContent>
         </Select>
       </div>

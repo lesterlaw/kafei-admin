@@ -56,7 +56,7 @@ export default async function NotificationsPage() {
               <p className="text-sm text-muted-foreground">
                 Trigger: {notification.trigger_event}
               </p>
-              <p className="text-sm">{notification.message}</p>
+              <p className="text-sm">{notification.content}</p>
               <Dialog>
                 <DialogTrigger asChild>
                   <Button variant="outline" className="w-full">

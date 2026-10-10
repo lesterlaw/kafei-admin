@@ -99,6 +99,19 @@ function OrderMissing({ id }: { id: string }) {
   )
 }
 
+// Older orders stored add-ons as a JSON string inside the jsonb column; newer ones store an array.
+function parseAddonIds(value: unknown): string[] {
+  let list: unknown = value
+  if (typeof value === 'string') {
+    try {
+      list = JSON.parse(value)
+    } catch {
+      list = []
+    }
+  }
+  return Array.isArray(list) ? list.filter((id): id is string => typeof id === 'string') : []
+}
+
 export default async function OrderDetailPage({
   params,
 }: {
@@ -256,9 +269,7 @@ export default async function OrderDetailPage({
                   items.map((rawItem, index) => {
                     const item = asRecord(rawItem) || {}
                     const product = firstRecord(item.products)
-                    const addons = Array.isArray(item.addons)
-                      ? item.addons.filter((value) => typeof value === 'string')
-                      : []
+                    const addons = parseAddonIds(item.addons)
                     return (
                       <TableRow key={text(item.id) || `item-${index}`}>
                         <TableCell className="font-medium">

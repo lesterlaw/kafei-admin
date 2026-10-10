@@ -21,8 +21,13 @@ async function seedAdmin() {
     },
   })
 
-  const email = 'admin@admin.com'
-  const password = 'admin@123'
+  const email = process.env.ADMIN_SEED_EMAIL
+  const password = process.env.ADMIN_SEED_PASSWORD
+
+  if (!email || !password || password.length < 12) {
+    console.error('Set ADMIN_SEED_EMAIL and ADMIN_SEED_PASSWORD (12+ characters) before seeding the admin.')
+    process.exit(1)
+  }
   const fullName = 'Admin User'
 
   try {

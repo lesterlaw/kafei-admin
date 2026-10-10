@@ -1,4 +1,5 @@
 import type { ColumnDef } from '@tanstack/react-table'
+import { toCsvCell } from '@/lib/datetime'
 
 export const DATA_TABLE_PAGE_SIZE_OPTIONS = [10, 25, 50, 100, 200] as const
 
@@ -66,9 +67,9 @@ function getByPath(row: unknown, path: string): unknown {
   }, row)
 }
 
-function formatCsvValue(value: unknown): string {
+function formatCsvValue(raw: unknown): string {
+  const value = toCsvCell(raw)
   if (value == null) return ''
-  if (value instanceof Date) return value.toISOString()
   if (typeof value === 'boolean') return value ? 'true' : 'false'
   if (typeof value === 'object') return JSON.stringify(value)
   return String(value)

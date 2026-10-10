@@ -77,7 +77,7 @@ export function EditNotificationForm({ notification }: { notification: any }) {
           id="message"
           name="message"
           rows={4}
-          defaultValue={notification.message}
+          defaultValue={notification.content}
           required
           disabled={isLoading}
         />

@@ -1,4 +1,5 @@
 import Papa from 'papaparse'
+import { toCsvCell } from '@/lib/datetime'
 
 export const exportToCSV = <T extends Record<string, any>>(
   data: T[],
@@ -11,12 +12,14 @@ export const exportToCSV = <T extends Record<string, any>>(
     csvData = data.map((row) => {
       const csvRow: Record<string, any> = {}
       columns.forEach((col) => {
-        csvRow[col.header] = row[col.key]
+        csvRow[col.header] = toCsvCell(row[col.key])
       })
       return csvRow
     })
   } else {
-    csvData = data
+    csvData = data.map((row) =>
+      Object.fromEntries(Object.entries(row).map(([key, value]) => [key, toCsvCell(value)]))
+    )
   }
 
   const csv = Papa.unparse(csvData)

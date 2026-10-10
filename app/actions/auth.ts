@@ -3,6 +3,7 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
+import { headers } from 'next/headers'
 
 export async function signIn(formData: FormData) {
   const email = formData.get('email') as string
@@ -65,8 +66,13 @@ export async function resetPassword(formData: FormData) {
 
   const supabase = await createServerSupabaseClient()
 
+  // Prefer the configured site URL. Fall back to this request's origin so the link never starts with "undefined".
+  // The target must also be in Supabase Auth's redirect allow list.
+  const origin = (await headers()).get('origin')
+  const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || origin || 'https://kafei-admin.vercel.app').replace(/\/$/, '')
+
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/reset-password`,
+    redirectTo: `${siteUrl}/reset-password`,
   })
 
   if (error) {

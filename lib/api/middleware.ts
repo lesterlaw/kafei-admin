@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { isDevTokenFormat, verifyDevToken } from '@/lib/auth/dev-otp'
 
 export interface ApiResponse<T = any> {
   success: boolean
@@ -41,31 +42,26 @@ export const authenticateRequest = async (request: NextRequest) => {
   if (authHeader?.startsWith('Bearer ')) {
     const token = authHeader.substring(7)
     
-    // Handle dev tokens (format: dev_token_${userId}_${timestamp})
-    if (token.startsWith('dev_token_')) {
-      const parts = token.split('_')
-      if (parts.length >= 3) {
-        const userId = parts[2]
-        const adminClient = createAdminClient()
-        
-        // Get user from database
-        const { data: userData } = await adminClient
-          .from('users')
-          .select('*')
-          .eq('id', userId)
-          .single()
-        
-        if (userData) {
-          // Return a user-like object for dev mode
-          return {
-            id: userData.id,
-            email: userData.email,
-            phone: userData.phone,
-            created_at: userData.created_at,
-            updated_at: userData.updated_at,
-          } as any
-        }
-      }
+    // Signed test-session tokens (lib/auth/dev-otp.ts). Only valid while test sign-in is enabled.
+    if (isDevTokenFormat(token)) {
+      const userId = verifyDevToken(token, 'access')
+      if (!userId) return null
+      const adminClient = createAdminClient()
+
+      const { data: userData } = await adminClient
+        .from('users')
+        .select('id, email, phone, created_at, updated_at, is_blocked')
+        .eq('id', userId)
+        .single()
+
+      if (!userData || userData.is_blocked) return null
+      return {
+        id: userData.id,
+        email: userData.email,
+        phone: userData.phone,
+        created_at: userData.created_at,
+        updated_at: userData.updated_at,
+      } as any
     }
     
     // Try to validate as a real Supabase token
@@ -73,6 +69,13 @@ export const authenticateRequest = async (request: NextRequest) => {
     const { data: { user }, error } = await adminClient.auth.getUser(token)
     
     if (!error && user) {
+      // Blocked customers lose access straight away, not when their token expires.
+      const { data: profile } = await adminClient
+        .from('users')
+        .select('is_blocked')
+        .eq('id', user.id)
+        .maybeSingle()
+      if (profile?.is_blocked) return null
       return user
     }
   }

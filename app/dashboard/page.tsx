@@ -8,7 +8,10 @@ async function getDashboardStats() {
   const [usersResult, ordersResult, referralsResult, subscriptionsResult] =
     await Promise.all([
       supabase.from('users').select('id', { count: 'exact', head: true }),
-      supabase.from('orders').select('id', { count: 'exact', head: true }),
+      supabase
+        .from('orders')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'completed'),
       supabase.from('referrals').select('id', { count: 'exact', head: true }),
       supabase
         .from('user_subscriptions')
@@ -59,7 +62,7 @@ export default async function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{stats.totalCoffeeRedeemed}</div>
-            <p className="text-xs text-muted-foreground">Total orders</p>
+            <p className="text-xs text-muted-foreground">Completed orders</p>
           </CardContent>
         </Card>
 

@@ -20,8 +20,8 @@ npm run seed:admin
 ```
 
 This will create the initial admin user:
-- Email: `admin@admin.com`
-- Password: `admin@123`
+- Email: set `ADMIN_SEED_EMAIL` before running `npm run seed:admin`
+- Password: set `ADMIN_SEED_PASSWORD` (12+ characters). Never commit it.
 
 ## Database Schema Overview
 

@@ -4,7 +4,6 @@ export const KIOSK_APK_SIZE_LABEL = '30 MB'
 export const KIOSK_APK_PATH = `/${KIOSK_APK_FILE_NAME}`
 export const KIOSK_APK_PAGE_PATH = '/kiosk'
 export const KIOSK_SERVER_URL = 'https://kafei-admin.vercel.app'
-export const KIOSK_DEVICE_TOKEN = '6362470095'
 
 export function formatKioskToken(token: string) {
   const digits = token.replace(/\D/g, '')

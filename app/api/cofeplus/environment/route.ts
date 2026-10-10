@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import {
-  authenticateRequest,
+  authenticateAdminRequest,
   createApiError,
   createApiResponse,
 } from '@/lib/api/middleware'
@@ -24,9 +24,10 @@ export async function GET() {
 
 export async function PUT(request: NextRequest) {
   try {
-    const user = await authenticateRequest(request)
-    if (!user) {
-      return createApiError('Unauthorized', 401)
+    // Switching the machine between test and live is an admin action.
+    const admin = await authenticateAdminRequest(request)
+    if (!admin) {
+      return createApiError('Admin access required', 403)
     }
 
     const body = await request.json().catch(() => ({}))

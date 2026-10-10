@@ -5,9 +5,7 @@ import {
   KIOSK_APK_PAGE_PATH,
   KIOSK_APK_SIZE_LABEL,
   KIOSK_APK_VERSION,
-  KIOSK_DEVICE_TOKEN,
   KIOSK_SERVER_URL,
-  formatKioskToken,
   getKioskApkStorageUrl,
 } from '@/lib/kiosk/apk'
 
@@ -32,9 +30,10 @@ export default function KioskDownloadPage() {
         </div>
 
         <p className="mt-4 text-sm text-muted-foreground">
-          Install this APK on both machine tablets. Type the 10-digit token
-          on the tablet, then choose window 1 or window 2 so each tablet
-          only starts drinks for that hole.
+          Install this APK on both machine tablets. Type the kiosk&apos;s
+          10-digit token on the tablet, then choose window 1 or window 2 so
+          each tablet only starts drinks for that hole. Staff get the token
+          from Kafei admin: Kiosks, open the kiosk, Kiosk APK token.
         </p>
 
         <div className="mt-6 grid grid-cols-2 gap-3 text-sm">
@@ -53,13 +52,6 @@ export default function KioskDownloadPage() {
             id="kiosk-server-url"
             label="Server URL"
             value={KIOSK_SERVER_URL}
-          />
-          <KioskCopyField
-            id="kiosk-device-token"
-            label="Kiosk token (type these 10 digits)"
-            value={KIOSK_DEVICE_TOKEN}
-            displayValue={formatKioskToken(KIOSK_DEVICE_TOKEN)}
-            large
           />
         </div>
 

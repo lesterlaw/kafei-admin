@@ -4,9 +4,8 @@ import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import type { User as AuthUser } from '@supabase/supabase-js'
 import { randomUUID } from 'crypto'
+import { isDevOtpAllowed, isDevOtpCode, signDevToken } from '@/lib/auth/dev-otp'
 
-// Default OTP for development - TODO: Remove in production
-const DEV_OTP = '000000'
 
 export async function POST(request: NextRequest) {
   try {
@@ -22,8 +21,9 @@ export async function POST(request: NextRequest) {
 
     const adminClient = createAdminClient()
 
-    // Development bypass: Accept 000000 as valid OTP
-    if (code === DEV_OTP) {
+    // Test sign-in for allowlisted testers only, while real SMS OTP is not set up.
+    // See lib/auth/dev-otp.ts. Everyone else goes through Supabase OTP below.
+    if (isDevOtpCode(code) && isDevOtpAllowed(phone || email)) {
       let userId: string
       let userData: any
       
@@ -169,12 +169,9 @@ export async function POST(request: NextRequest) {
         }
       }
       
-      // Return dev tokens
-      const accessToken = `dev_token_${userId}_${Date.now()}`
-      const refreshToken = `dev_refresh_${userId}_${Date.now()}`
-      
-      console.log('Dev mode: Created/found user:', userId)
-      console.log('Dev mode: Access token:', accessToken)
+      // Signed, expiring tokens. A token cannot be made from a user ID alone.
+      const accessToken = signDevToken(userId, 'access')
+      const refreshToken = signDevToken(userId, 'refresh')
       
       return createApiResponse({
         user: userData,

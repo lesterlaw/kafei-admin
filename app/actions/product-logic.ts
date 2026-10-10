@@ -2,9 +2,11 @@
 
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { verifyAdmin } from '@/lib/auth/verify-admin'
 import { invalidateProductLogicSettingsCache } from '@/lib/product-logic/settings'
 
 export async function getProductLogicSettingsAction() {
+  await verifyAdmin()
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from('product_logic_settings')
@@ -19,6 +21,7 @@ export async function getProductLogicSettingsAction() {
 }
 
 export async function updateProductLogicSettingsAction(formData: FormData) {
+  await verifyAdmin()
   const supabase = createAdminClient()
   const num = (key: string, fallback: number) => {
     const raw = formData.get(key)
@@ -71,6 +74,7 @@ export async function updateProductLogicSettingsFormAction(formData: FormData) {
 }
 
 export async function listHouseAdsAction() {
+  await verifyAdmin()
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from('house_ads')
@@ -84,6 +88,7 @@ export async function listHouseAdsAction() {
 }
 
 export async function createHouseAdAction(formData: FormData) {
+  await verifyAdmin()
   const supabase = createAdminClient()
   const title = String(formData.get('title') || '').trim()
   const media_url = String(formData.get('media_url') || '').trim()
@@ -117,6 +122,7 @@ export async function createHouseAdAction(formData: FormData) {
 }
 
 export async function updateHouseAdAction(id: string, formData: FormData) {
+  await verifyAdmin()
   const supabase = createAdminClient()
   const title = String(formData.get('title') || '').trim()
   const media_url = String(formData.get('media_url') || '').trim()
@@ -152,6 +158,7 @@ export async function updateHouseAdAction(id: string, formData: FormData) {
 }
 
 export async function deleteHouseAdAction(id: string) {
+  await verifyAdmin()
   const supabase = createAdminClient()
   const { error } = await supabase.from('house_ads').delete().eq('id', id)
   if (error) {

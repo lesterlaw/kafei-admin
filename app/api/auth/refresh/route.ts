@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createApiResponse, createApiError } from '@/lib/api/middleware'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { isDevTokenFormat, signDevToken, verifyDevToken } from '@/lib/auth/dev-otp'
 
 export async function POST(request: NextRequest) {
   try {
@@ -11,6 +12,29 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = createAdminClient()
+
+    // Test-session refresh tokens (lib/auth/dev-otp.ts)
+    if (isDevTokenFormat(refresh_token)) {
+      const userId = verifyDevToken(refresh_token, 'refresh')
+      if (!userId) {
+        return createApiError('Session expired', 401)
+      }
+      const { data: userData } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', userId)
+        .single()
+      if (!userData || userData.is_blocked) {
+        return createApiError('Session expired', 401)
+      }
+      return createApiResponse({
+        user: userData,
+        session: null,
+        access_token: signDevToken(userId, 'access'),
+        refresh_token: signDevToken(userId, 'refresh'),
+      })
+    }
+
     const { data, error } = await supabase.auth.refreshSession({
       refresh_token,
     })

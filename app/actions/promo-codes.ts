@@ -4,6 +4,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import type { PromoCodeType } from '@/types/database'
+import { parseSingaporeDateTimeLocal } from '@/lib/datetime'
 
 async function verifyAdmin() {
   const supabase = await createServerSupabaseClient()
@@ -44,9 +45,9 @@ function parseOptionalDatetime(value: FormDataEntryValue | null): string | null 
   if (value === null || value === undefined || String(value).trim() === '') {
     return null
   }
-  const d = new Date(String(value))
-  if (Number.isNaN(d.getTime())) return null
-  return d.toISOString()
+  // The form sends Singapore wall-clock time with no offset. new Date() would read it as UTC on Vercel.
+  const d = parseSingaporeDateTimeLocal(String(value))
+  return d ? d.toISOString() : null
 }
 
 function parseUserIds(raw: string | null): string[] {

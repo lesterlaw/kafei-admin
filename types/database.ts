@@ -23,7 +23,7 @@ export interface SubscriptionTier {
   name: string
   description: string
   price: number
-  period: 'free' | 'monthly' | 'annual' | '3year'
+  period: 'free' | 'monthly' | 'annual'
   features: string[]
   coupon_per_day: number
   is_hidden?: boolean

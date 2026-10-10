@@ -77,7 +77,7 @@ export async function createNotification(formData: FormData) {
 
   const { error } = await supabase.from('notifications').insert({
     title,
-    message,
+    content: message,
     trigger_event: triggerEvent,
     is_active: isActive,
   })
@@ -103,7 +103,7 @@ export async function updateNotification(id: string, formData: FormData) {
     .from('notifications')
     .update({
       title,
-      message,
+      content: message,
       trigger_event: triggerEvent,
       is_active: isActive,
     })

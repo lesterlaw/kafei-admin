@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createApiResponse, createApiError, authenticateRequest } from '@/lib/api/middleware'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
-
-// Dev mode - skip actual OTP sending
-const DEV_MODE = true
+import { isDevOtpAllowed } from '@/lib/auth/dev-otp'
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,10 +12,11 @@ export async function POST(request: NextRequest) {
 
     // Phone OTP login (for mobile app)
     if (phone) {
-      // In dev mode, skip actual Supabase OTP (requires Twilio setup)
-      if (DEV_MODE) {
+      // Allowlisted testers use the test code instead of an SMS (see lib/auth/dev-otp.ts).
+      // Never reveal the code in the response.
+      if (isDevOtpAllowed(phone)) {
         return createApiResponse({
-          message: 'OTP sent to phone (dev mode - use 000000)',
+          message: 'OTP sent to phone',
           phone,
         })
       }

@@ -3,6 +3,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { singaporeDateString, singaporeDayBounds } from '@/lib/product-logic/settings'
 import {
   persistImmediateDispatchForOrder,
   persistPickupForOrder,
@@ -274,21 +275,16 @@ export async function getMachineQueueLanes(): Promise<QueueLane[]> {
   })
 }
 
+// "Today" is the Singapore calendar day. The server runs in UTC on Vercel.
 function startOfLocalDayIso() {
-  const now = new Date()
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
+  return singaporeDayBounds().start.toISOString()
 }
 
 function isSameLocalDay(iso: string) {
   if (!iso) return false
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return false
-  const now = new Date()
-  return (
-    date.getFullYear() === now.getFullYear() &&
-    date.getMonth() === now.getMonth() &&
-    date.getDate() === now.getDate()
-  )
+  return singaporeDateString(date) === singaporeDateString()
 }
 
 export async function getCofeplusLiveLanes(): Promise<CofeplusLiveLane[]> {
