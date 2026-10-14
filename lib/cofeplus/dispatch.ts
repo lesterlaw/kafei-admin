@@ -630,9 +630,13 @@ export async function fetchPodAvailability(
     return { available: true, status }
   }
 
-  const blocked = /offline|fault|error|down|unavailable|stopped|maintenance/i.test(
-    status
-  )
+  // The Gate answers a plain "OK" or "NOT OK". NOT OK shows up during a machine
+  // fault (it stays OK while brewing), so treat it like offline and hold the
+  // queue instead of opening scan windows nobody can use.
+  const blocked =
+    /\bnot\s*ok\b|offline|fault|error|down|unavailable|stopped|maintenance/i.test(
+      status
+    )
   return { available: !blocked, status }
 }
 
