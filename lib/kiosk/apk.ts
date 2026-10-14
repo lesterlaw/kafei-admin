@@ -1,6 +1,6 @@
-export const KIOSK_APK_VERSION = '1.0.14'
+export const KIOSK_APK_VERSION = '1.0.16'
 export const KIOSK_APK_FILE_NAME = 'kafei-kiosk.apk'
-export const KIOSK_APK_SIZE_LABEL = '30 MB'
+export const KIOSK_APK_SIZE_LABEL = '32 MB'
 export const KIOSK_APK_PATH = `/${KIOSK_APK_FILE_NAME}`
 export const KIOSK_APK_PAGE_PATH = '/kiosk'
 export const KIOSK_SERVER_URL = 'https://kafei-admin.vercel.app'
