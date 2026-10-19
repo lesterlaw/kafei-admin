@@ -24,6 +24,7 @@ function couponTitle(kind: string, code: string) {
   if (kind === 'stamp' || code.startsWith('ST-')) return 'Stamp reward - Latte/Americano'
   if (code.startsWith('RD-')) return 'Referral drink coupon - Latte/Americano'
   if (code.startsWith('RA-')) return 'Referral add-on coupon'
+  if (code.startsWith('MP-')) return 'Free drink - QR expired before pickup'
   return 'Reward coupon'
 }
 

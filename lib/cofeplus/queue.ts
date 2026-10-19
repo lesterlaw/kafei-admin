@@ -43,10 +43,20 @@ const MACHINE_BUSY_STATUSES = ['pending', 'brewing', 'ready'] as const
 /** Orders still waiting for their turn (no pickup QR yet) */
 const QUEUE_WAITING_STATUSES = ['queued'] as const
 
+/** Coupon code prefix for the free drink given after a missed pickup */
+export const MISSED_PICKUP_COUPON_PREFIX = 'MP-'
+
 const ORDER_SELECT =
   'id, status, pickup_code, cofeplus_dispatch_id, cofeplus_pod_id, cofeplus_environment, machine_activated_at, scan_expires_at, missed_scans, created_at, order_number, user_id, kiosk_id, delivery_port, redemption_id'
 
-const MAX_MISSED_SCANS = 3
+/** One scan window per order (SLP-1382): a missed window cancels the order. */
+export const MAX_MISSED_SCANS = 1
+
+/** Default QR scan window. Admin can change it under Product Logic. */
+export const DEFAULT_SCAN_WINDOW_SECONDS = 150
+
+/** Days a missed-pickup replacement coupon stays valid */
+const MISSED_PICKUP_COUPON_DAYS = 30
 
 /** Physical dispense holes on a Kafei machine */
 export const DISPENSE_PORTS = [1, 2] as const
@@ -128,10 +138,10 @@ async function scanExpiryIso(
 ): Promise<string> {
   try {
     const settings = await getProductLogicSettings(adminClient)
-    const seconds = settings.scan_window_seconds || 80
+    const seconds = settings.scan_window_seconds || DEFAULT_SCAN_WINDOW_SECONDS
     return new Date(from + seconds * 1000).toISOString()
   } catch {
-    return new Date(from + 80_000).toISOString()
+    return new Date(from + DEFAULT_SCAN_WINDOW_SECONDS * 1000).toISOString()
   }
 }
 
@@ -328,7 +338,7 @@ export function missedScanQueueMessage(position: number | null) {
 }
 
 export function cancelledAfterMissedScansMessage() {
-  return 'This order was cancelled after 3 missed scans. Please place a new order in the app.'
+  return 'Your QR expired, so this order was cancelled. A free drink coupon is in your app under Promo Code.'
 }
 
 /** CofePlus create-dispatch requires an integer hole. Prefer an unused 1|2. */
@@ -1472,8 +1482,9 @@ async function createdAtForThirdPlace(
 }
 
 /**
- * If the QR is not scanned within the window, push the user to 3rd in queue
- * and regenerate later. After 3 misses the order is cancelled.
+ * If the QR is not scanned within the window the order is cancelled and the
+ * customer gets a free drink coupon to order again (SLP-1382). The requeue
+ * branch below only runs if MAX_MISSED_SCANS is raised again.
  */
 async function maybeExpireMissedScan(
   adminClient: SupabaseClient,
@@ -1494,9 +1505,10 @@ async function maybeExpireMissedScan(
       const settings = await getProductLogicSettings(adminClient)
       deadline =
         new Date(order.machine_activated_at).getTime() +
-        (settings.scan_window_seconds || 80) * 1000
+        (settings.scan_window_seconds || DEFAULT_SCAN_WINDOW_SECONDS) * 1000
     } catch {
-      deadline = new Date(order.machine_activated_at).getTime() + 80_000
+      deadline =
+        new Date(order.machine_activated_at).getTime() + DEFAULT_SCAN_WINDOW_SECONDS * 1000
     }
   }
 
@@ -1533,6 +1545,10 @@ async function maybeExpireMissedScan(
       } catch (err) {
         console.error('[queue] releaseRedemption failed', err)
       }
+      // A released Beans / stamp redemption already gives the reward back
+      if (!cancelled.redemption_id) {
+        await grantMissedPickupCoupon(adminClient, cancelled as MachineOrderRow)
+      }
       return cancelled as MachineOrderRow
     }
     return order
@@ -1563,6 +1579,29 @@ async function maybeExpireMissedScan(
     .maybeSingle()
 
   return (bumped as MachineOrderRow) || order
+}
+
+/** One free drink coupon per missed order, so the customer can order the same drink again. */
+async function grantMissedPickupCoupon(
+  adminClient: SupabaseClient,
+  order: MachineOrderRow
+) {
+  if (!order.user_id) return
+  const code = `${MISSED_PICKUP_COUPON_PREFIX}${order.order_number || order.id}`
+  const expiresAt = new Date(
+    Date.now() + MISSED_PICKUP_COUPON_DAYS * 24 * 60 * 60 * 1000
+  ).toISOString()
+  // The code is unique per order, so a retry cannot hand out a second coupon
+  const { error } = await adminClient.from('coupons').insert({
+    user_id: order.user_id,
+    code,
+    expires_at: expiresAt,
+    kind: 'other',
+    granted_at: new Date().toISOString(),
+  })
+  if (error && error.code !== '23505') {
+    console.error('[queue] missed pickup coupon failed', order.id, error)
+  }
 }
 
 /** Requeue a pending order whose scan window has already closed. */

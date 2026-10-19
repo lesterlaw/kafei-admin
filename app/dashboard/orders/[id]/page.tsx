@@ -3,6 +3,12 @@ import { ArrowLeft } from 'lucide-react'
 import { getOrderById } from '@/app/actions/orders'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { formatSingaporeDateTime } from '@/lib/datetime'
+import {
+  addonLabel,
+  describeLatteArt,
+  loadAddonMap,
+  parseAddonIds,
+} from '@/lib/orders/item-details'
 import { Button } from '@/components/ui/button'
 import { OrderStatusSelect } from '../order-status-select'
 import { ResetScanButton } from '../reset-scan-button'
@@ -99,19 +105,6 @@ function OrderMissing({ id }: { id: string }) {
   )
 }
 
-// Older orders stored add-ons as a JSON string inside the jsonb column; newer ones store an array.
-function parseAddonIds(value: unknown): string[] {
-  let list: unknown = value
-  if (typeof value === 'string') {
-    try {
-      list = JSON.parse(value)
-    } catch {
-      list = []
-    }
-  }
-  return Array.isArray(list) ? list.filter((id): id is string => typeof id === 'string') : []
-}
-
 export default async function OrderDetailPage({
   params,
 }: {
@@ -139,6 +132,10 @@ export default async function OrderDetailPage({
 
     const { couponCode, paymentLabel } = await loadCouponLabel(order.coupon_id)
     const items = Array.isArray(order.order_items) ? order.order_items : []
+    const addonMap = await loadAddonMap(
+      createAdminClient(),
+      items.map((item) => asRecord(item) || {})
+    )
     const user = firstRecord(order.users)
     const kiosk = firstRecord(order.kiosks)
     const status = String(order.status || 'unknown')
@@ -256,12 +253,13 @@ export default async function OrderDetailPage({
                   <TableHead>Qty</TableHead>
                   <TableHead>Price</TableHead>
                   <TableHead>Add-ons</TableHead>
+                  <TableHead>Latte art</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {items.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-muted-foreground">
+                    <TableCell colSpan={5} className="text-muted-foreground">
                       No items on this order.
                     </TableCell>
                   </TableRow>
@@ -270,6 +268,7 @@ export default async function OrderDetailPage({
                     const item = asRecord(rawItem) || {}
                     const product = firstRecord(item.products)
                     const addons = parseAddonIds(item.addons)
+                    const art = describeLatteArt(item.latte_art_flag, item.latte_art_locator)
                     return (
                       <TableRow key={text(item.id) || `item-${index}`}>
                         <TableCell className="font-medium">
@@ -288,7 +287,39 @@ export default async function OrderDetailPage({
                           )}
                         </TableCell>
                         <TableCell>
-                          {addons.length > 0 ? addons.join(', ') : '—'}
+                          {addons.length > 0 ? (
+                            <ul className="space-y-1">
+                              {addons.map((addonId) => {
+                                const addon = addonMap.get(addonId)
+                                return (
+                                  <li key={addonId}>
+                                    {addon ? addonLabel(addon) : 'Removed add-on'}
+                                  </li>
+                                )
+                              })}
+                            </ul>
+                          ) : (
+                            'None (standard recipe)'
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {art ? (
+                            <div className="flex items-center gap-3">
+                              {art.imageUrl ? (
+                                <a href={art.imageUrl} target="_blank" rel="noreferrer">
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img
+                                    src={art.imageUrl}
+                                    alt="Latte art to print"
+                                    className="h-14 w-14 rounded-full border object-cover"
+                                  />
+                                </a>
+                              ) : null}
+                              <span>{art.label}</span>
+                            </div>
+                          ) : (
+                            'No latte art'
+                          )}
                         </TableCell>
                       </TableRow>
                     )

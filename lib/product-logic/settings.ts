@@ -32,7 +32,7 @@ const DEFAULTS: Omit<ProductLogicSettings, 'id' | 'updated_at'> = {
   checkin_beans: 5,
   welcome_beans: 5,
   free_bean_expiry_days: 60,
-  scan_window_seconds: 80,
+  scan_window_seconds: 150,
   robot_max_orders: 2,
   bean_americano: 250,
   bean_latte: 300,

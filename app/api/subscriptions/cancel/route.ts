@@ -18,6 +18,8 @@ export async function POST(request: NextRequest) {
       .select('*, subscription_tiers(*)')
       .eq('user_id', user.id)
       .eq('status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(1)
       .maybeSingle()
 
     if (!subscription) {
@@ -55,7 +57,7 @@ export async function POST(request: NextRequest) {
       return createApiError(error.message, 500)
     }
 
-    return createApiResponse(updated)
+    return createApiResponse({ ...updated, tier: updated.subscription_tiers ?? null })
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Internal server error'
     return createApiError(message, 500)

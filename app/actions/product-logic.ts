@@ -35,7 +35,7 @@ export async function updateProductLogicSettingsAction(formData: FormData) {
     checkin_beans: num('checkin_beans', 5),
     welcome_beans: num('welcome_beans', 5),
     free_bean_expiry_days: num('free_bean_expiry_days', 60),
-    scan_window_seconds: num('scan_window_seconds', 80),
+    scan_window_seconds: num('scan_window_seconds', 150),
     robot_max_orders: num('robot_max_orders', 2),
     bean_americano: num('bean_americano', 250),
     bean_latte: num('bean_latte', 300),

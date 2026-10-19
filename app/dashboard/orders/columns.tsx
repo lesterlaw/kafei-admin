@@ -103,6 +103,15 @@ export const orderColumns: ColumnDef<any>[] = [
       row.users?.email || row.users?.full_name || row.users?.phone || '—',
   },
   {
+    accessorKey: 'details',
+    header: 'Drink and add-ons',
+    cell: ({ row }) => (
+      <span className="block max-w-[320px] whitespace-normal text-sm">
+        {row.original.details || 'No items'}
+      </span>
+    ),
+  },
+  {
     id: 'kiosk',
     header: 'Kiosk',
     accessorFn: (row) => row.kiosks?.name || row.kiosks?.location || '—',

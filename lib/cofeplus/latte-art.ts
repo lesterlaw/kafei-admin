@@ -32,10 +32,11 @@ export function drinkSupportsLatteArt(
 ) {
   if (isIcedDrink(name, temperature)) return false
   const normalized = normalizeDrinkName(name)
-  if (/americano|espresso|long black|black coffee|cold brew/.test(normalized)) {
+  // Cappuccino foam is too thick for art (client request, SLP-1159)
+  if (/americano|espresso|long black|black coffee|cold brew|cappuccino/.test(normalized)) {
     return false
   }
-  return /latte|cappuccino|flat white|mocha|macchiato|cortado|\bmilk\b/.test(
+  return /latte|flat white|mocha|macchiato|cortado|\bmilk\b/.test(
     normalized
   )
 }

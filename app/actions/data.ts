@@ -2,6 +2,7 @@
 
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { loadAddonMap, summarizeOrderItem } from '@/lib/orders/item-details'
 
 async function verifyAdmin() {
   const supabase = await createServerSupabaseClient()
@@ -62,11 +63,22 @@ export async function getOrders() {
     const supabase = createAdminClient()
     const embedded = await supabase
       .from('orders')
-      .select('*, users(email, full_name, phone), kiosks(name, location, address)')
+      .select(
+        '*, users(email, full_name, phone), kiosks(name, location, address), order_items(addons, latte_art_flag, latte_art_locator, products(name))'
+      )
       .order('created_at', { ascending: false })
 
     if (!embedded.error) {
-      return embedded.data || []
+      // Drink, add-ons and latte art as one readable line for the table and CSV
+      const rows = embedded.data || []
+      const items = rows.flatMap((row) => (Array.isArray(row.order_items) ? row.order_items : []))
+      const addonMap = await loadAddonMap(supabase, items)
+      return rows.map(({ order_items, ...row }) => ({
+        ...row,
+        details: (Array.isArray(order_items) ? order_items : [])
+          .map((item) => summarizeOrderItem(item, addonMap))
+          .join(' | '),
+      }))
     }
 
     console.error('getOrders embed failed, falling back:', embedded.error.message)

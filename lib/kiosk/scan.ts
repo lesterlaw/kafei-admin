@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { getActiveCofeplusEnvironment } from '@/lib/cofeplus/settings'
 import {
   cancelledAfterMissedScansMessage,
+  MAX_MISSED_SCANS,
   findBusyMachineOrders,
   getQueueSnapshot,
   missedScanQueueMessage,
@@ -261,7 +262,7 @@ export async function scanPickupAtKiosk(
     return {
       ok: false,
       error:
-        missed >= 3
+        missed >= MAX_MISSED_SCANS
           ? cancelledAfterMissedScansMessage()
           : 'This order was cancelled.',
       status: 409,

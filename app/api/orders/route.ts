@@ -69,6 +69,12 @@ const createOrderSchema = z.object({
     .optional(),
 })
 
+/** The machine's standard milk is never stored as an add-on, so any milk add-on is a swap */
+function isMilkSwapAddon(addon: { name?: string | null; cofeplus_group?: string | null }) {
+  if (addon.cofeplus_group === 'milk') return true
+  return /\boat\b|almond|soy/i.test(addon.name || '')
+}
+
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Internal server error'
 }
@@ -244,7 +250,7 @@ export async function POST(request: NextRequest) {
     if (addons && addons.length > 0) {
       const { data: addonData } = await adminClient
         .from('add_ons')
-        .select('id, price')
+        .select('id, name, price, cofeplus_group')
         .in('id', addons)
         .eq('is_hidden', false)
 
@@ -252,6 +258,11 @@ export async function POST(request: NextRequest) {
       const found = new Set((addonData || []).map((addon) => addon.id))
       if (addons.some((id) => !found.has(id))) {
         return createApiError('One of the selected add-ons is not available right now', 400)
+      }
+
+      // Latte art cups are made with the standard milk, so a milk swap would be charged and ignored
+      if (latteArtFlag && (addonData || []).some((addon) => isMilkSwapAddon(addon))) {
+        return createApiError('Oat milk is not available with latte art.', 400)
       }
 
       addonTotal = (addonData || []).reduce((sum, addon) => sum + Number(addon.price), 0)

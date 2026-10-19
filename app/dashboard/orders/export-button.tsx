@@ -8,6 +8,7 @@ export function ExportOrdersButton({ orders }: { orders: any[] }) {
     exportToCSV(orders, 'orders', [
       { key: 'order_number', header: 'Order Number' },
       { key: 'users.email', header: 'User Email' },
+      { key: 'details', header: 'Drink and add-ons' },
       { key: 'kiosks.name', header: 'Kiosk' },
       { key: 'status', header: 'Status' },
       { key: 'total_amount', header: 'Amount' },

@@ -118,6 +118,8 @@ export async function resolveMembership(
     .select('id, tier_id, status, subscription_tiers(id, period, is_hidden)')
     .eq('user_id', userId)
     .eq('status', 'active')
+    .order('created_at', { ascending: false })
+    .limit(1)
     .maybeSingle()
 
   const tier = subscription?.subscription_tiers as

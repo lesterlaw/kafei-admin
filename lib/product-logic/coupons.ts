@@ -85,7 +85,8 @@ export async function getUnusedRewardCoupons(
     }
     if (isStampCoupon(coupon)) return true
     const code = String(coupon.code || '')
-    return code.startsWith('RD-') || code.startsWith('RA-')
+    // MP- is the free drink given when a pickup QR expired (lib/cofeplus/queue.ts)
+    return code.startsWith('RD-') || code.startsWith('RA-') || code.startsWith('MP-')
   })
 }
 
