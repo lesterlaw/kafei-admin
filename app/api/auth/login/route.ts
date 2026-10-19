@@ -26,6 +26,14 @@ export async function POST(request: NextRequest) {
       })
 
       if (error) {
+        // No SMS provider configured in Supabase, or the provider rejected the send
+        if (/unsupported phone provider|sms|twilio|messagebird|vonage/i.test(error.message)) {
+          console.error('[auth/login] SMS OTP send failed', error.message)
+          return createApiError(
+            "We couldn't send your sign-in code right now. Please try again later or email hello@kafei.sg.",
+            503
+          )
+        }
         return createApiError(error.message, 400)
       }
 
