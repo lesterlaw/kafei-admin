@@ -1,5 +1,6 @@
 import { NextRequest, after } from 'next/server'
 import { createApiResponse, createApiError, authenticateRequest } from '@/lib/api/middleware'
+import { withItemDetails } from '@/lib/orders/item-details'
 import { createClient } from '@supabase/supabase-js'
 import { z } from 'zod'
 import { resolveCofeplusEnvironment } from '@/lib/cofeplus/proxy'
@@ -114,7 +115,7 @@ export async function GET(request: NextRequest) {
       return createApiError(error.message, 500)
     }
 
-    return createApiResponse(data || [])
+    return createApiResponse(await withItemDetails(adminClient, data || []))
   } catch (error: unknown) {
     return createApiError(getErrorMessage(error), 500)
   }
@@ -663,8 +664,9 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const [detailedOrder] = await withItemDetails(adminClient, [finalOrder])
     return createApiResponse({
-      ...finalOrder,
+      ...detailedOrder,
       queue: queueMeta,
     })
   } catch (error: unknown) {

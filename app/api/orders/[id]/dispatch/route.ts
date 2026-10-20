@@ -4,6 +4,7 @@ import {
   createApiError,
   createApiResponse,
 } from '@/lib/api/middleware'
+import { withItemDetails } from '@/lib/orders/item-details'
 import { createClient } from '@supabase/supabase-js'
 import {
   fetchDispatchSnapshot,
@@ -111,8 +112,9 @@ export async function GET(
     }
 
     if (!machineOrder.cofeplus_pod_id) {
+      const [detailedOrder] = await withItemDetails(adminClient, [order])
       return createApiResponse({
-        order,
+        order: detailedOrder,
         dispatch: null,
         queue: {
           position: null,
@@ -223,8 +225,9 @@ export async function GET(
       }
     }
 
+    const [detailedOrder] = await withItemDetails(adminClient, [currentOrder])
     return createApiResponse({
-      order: currentOrder,
+      order: detailedOrder,
       dispatch,
       queue,
       environment: currentEnvironment,

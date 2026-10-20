@@ -96,3 +96,48 @@ export function summarizeOrderItem(
   if (art) parts.push(`Art: ${art.label}`)
   return parts.join(' · ')
 }
+
+export interface OrderItemDetails {
+  /** One line per add-on, e.g. { label: 'Milk', value: 'Oat Milk', price: 0.8 } */
+  options: { label: string; value: string; price: number }[]
+  latte_art: { label: string; image_url: string | null } | null
+}
+
+/** What the customer picked for one order item, ready for the app to show. */
+export function buildItemDetails(
+  item: { addons?: unknown; latte_art_flag?: unknown; latte_art_locator?: unknown },
+  addonMap: Map<string, AddonInfo>
+): OrderItemDetails {
+  const options = parseAddonIds(item.addons).map((id) => {
+    const addon = addonMap.get(id)
+    if (!addon) return { label: 'Add-on', value: 'Removed add-on', price: 0 }
+    const label = addon.group ? GROUP_LABELS[addon.group] || addon.group : 'Extra'
+    return { label, value: addon.name, price: addon.price }
+  })
+  const art = describeLatteArt(item.latte_art_flag, item.latte_art_locator)
+  return {
+    options,
+    latte_art: art ? { label: art.label, image_url: art.imageUrl } : null,
+  }
+}
+
+type OrderWithItems = {
+  order_items?: { addons?: unknown; latte_art_flag?: unknown; latte_art_locator?: unknown }[] | null
+}
+
+/** Adds item_details to every order item, loading add-on names in one query. */
+export async function withItemDetails<T extends OrderWithItems>(
+  supabase: SupabaseClient,
+  orders: T[]
+): Promise<T[]> {
+  const items = orders.flatMap((order) => order.order_items || [])
+  if (items.length === 0) return orders
+  const addonMap = await loadAddonMap(supabase, items)
+  return orders.map((order) => ({
+    ...order,
+    order_items: (order.order_items || []).map((item) => ({
+      ...item,
+      item_details: buildItemDetails(item, addonMap),
+    })),
+  }))
+}

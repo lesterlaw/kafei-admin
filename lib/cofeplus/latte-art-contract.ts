@@ -9,6 +9,15 @@ export const LATTE_ART_GROUP = 'latte-art'
 export const OPTIONAL_MODIFIER_GROUPS = ['syrup'] as const
 export const NO_MODIFIER_FLAG = 'none'
 
+/**
+ * Syrup options carry `requires: { group: 'sweetness' }` on the machine: the
+ * sweetness weight is the syrup dose, and sugar0 (weight 0) pumps nothing. A
+ * picked syrup with no dose chosen gets the machine's standard level instead.
+ */
+export const SYRUP_DOSE_GROUP = 'sweetness'
+export const NO_SYRUP_DOSE_FLAG = 'sugar0'
+export const STANDARD_SYRUP_DOSE_FLAG = 'sugar2'
+
 export function isOptionalModifierGroup(group: string | null | undefined) {
   return (OPTIONAL_MODIFIER_GROUPS as readonly string[]).includes(group || '')
 }

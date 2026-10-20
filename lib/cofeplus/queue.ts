@@ -16,7 +16,10 @@ import {
   LATTE_ART_LOCATOR_CHOICE,
   HAND_LATTE_ART_ITEM_CODES,
   NO_MODIFIER_FLAG,
+  NO_SYRUP_DOSE_FLAG,
   OPTIONAL_MODIFIER_GROUPS,
+  STANDARD_SYRUP_DOSE_FLAG,
+  SYRUP_DOSE_GROUP,
   isPlainHotLatte,
   parseHandArtLocator,
 } from '@/lib/cofeplus/latte-art-contract'
@@ -606,6 +609,13 @@ async function loadOrderItemForDispatch(
   // An optional group with nothing picked means none, not the machine default
   for (const group of OPTIONAL_MODIFIER_GROUPS) {
     if (!modifierPreferences[group]) modifierPreferences[group] = NO_MODIFIER_FLAG
+  }
+
+  // A syrup is only pumped at the sweetness weight, and the default is zero
+  const syrup = modifierPreferences.syrup
+  const dose = modifierPreferences[SYRUP_DOSE_GROUP]
+  if (syrup && syrup !== NO_MODIFIER_FLAG && (!dose || dose === NO_SYRUP_DOSE_FLAG)) {
+    modifierPreferences[SYRUP_DOSE_GROUP] = STANDARD_SYRUP_DOSE_FLAG
   }
 
   const latteArtFlag =
