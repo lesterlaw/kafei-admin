@@ -297,6 +297,8 @@ export async function updateAddOn(id: string, formData: FormData) {
       price,
       temperature: temperature || null,
       is_hidden: isHidden,
+      // Saving is the admin's review of any machine label change
+      cofeplus_display_changed_at: null,
     })
     .eq('id', id)
 

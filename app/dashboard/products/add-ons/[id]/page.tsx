@@ -41,6 +41,15 @@ export default async function AddOnDetailPage({
         </div>
       </div>
 
+      {addon.cofeplus_display_changed_at && addon.cofeplus_display ? (
+        <div className="rounded-md border border-amber-500/50 bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+          The machine now calls <code>{addon.cofeplus_group}/{addon.cofeplus_flag}</code>{' '}
+          <strong>{addon.cofeplus_display}</strong>. Customers who pick{' '}
+          <strong>{addon.name}</strong> get that option. Fix the display name if
+          it no longer fits, then save to clear this notice.
+        </div>
+      ) : null}
+
       <AddOnForm products={products} addon={addon} />
 
       <form

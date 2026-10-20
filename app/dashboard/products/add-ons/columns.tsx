@@ -2,7 +2,7 @@
 
 import { ColumnDef } from '@tanstack/react-table'
 import { Badge } from '@/components/ui/badge'
-import { Eye, EyeOff } from 'lucide-react'
+import { AlertTriangle, Eye, EyeOff } from 'lucide-react'
 
 type AddonRow = {
   id: string
@@ -14,6 +14,8 @@ type AddonRow = {
   source?: string | null
   cofeplus_group?: string | null
   cofeplus_flag?: string | null
+  cofeplus_display?: string | null
+  cofeplus_display_changed_at?: string | null
   product_addons?: { product_id: string }[] | null
 }
 
@@ -21,6 +23,32 @@ export const addonColumns: ColumnDef<AddonRow>[] = [
   {
     accessorKey: 'name',
     header: 'Display name',
+  },
+  {
+    accessorKey: 'cofeplus_display',
+    header: 'Machine name',
+    cell: ({ row }) => {
+      const machine = row.original.cofeplus_display
+      if (!machine) {
+        return <span className="text-muted-foreground">—</span>
+      }
+      if (row.original.cofeplus_display_changed_at) {
+        return (
+          <div className="flex items-center gap-2">
+            <span>{machine}</span>
+            <Badge
+              variant="outline"
+              className="border-amber-500 text-amber-700"
+              title="The machine name differs from the display name. Open and save to confirm."
+            >
+              <AlertTriangle className="mr-1 h-3 w-3" />
+              Check name
+            </Badge>
+          </div>
+        )
+      }
+      return machine
+    },
   },
   {
     accessorKey: 'price',

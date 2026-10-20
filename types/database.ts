@@ -41,6 +41,10 @@ export interface AddOn {
   cofeplus_group?: string | null
   cofeplus_flag?: string | null
   cofeplus_locator?: string | null
+  /** Machine label for the group/flag as of the last active-environment sync */
+  cofeplus_display?: string | null
+  /** Set when the machine label stopped matching an admin-set name */
+  cofeplus_display_changed_at?: string | null
   source?: 'manual' | 'cofeplus'
   created_at: string
   updated_at: string

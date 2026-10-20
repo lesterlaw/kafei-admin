@@ -17,6 +17,7 @@ import {
   matchMenuItem,
   normalizeDrinkName,
 } from '@/lib/cofeplus/product-map'
+import { getActiveCofeplusEnvironment } from '@/lib/cofeplus/settings'
 
 export interface SyncCatalogOptions {
   environment: CofeplusEnvironment
@@ -385,16 +386,56 @@ const SKIP_ADDON_GROUPS = new Set([
 ])
 
 /**
+ * Name changes for an existing add-on when the machine label is `label`.
+ * Follows the machine while the name is still the previous machine label;
+ * keeps an admin rename and flags it for review instead. Null: nothing changed.
+ */
+export function followMachineLabel(
+  existing: { name: string; cofeplus_display: string | null },
+  label: string,
+  now: string
+): {
+  cofeplus_display: string
+  name?: string
+  cofeplus_display_changed_at?: string | null
+} | null {
+  if (existing.cofeplus_display === label) return null
+  // No label stored yet (rows from before labels were tracked): any other name
+  // counts as a rename, since nothing says it was ever the machine label
+  const renamed =
+    existing.cofeplus_display == null
+      ? existing.name !== label
+      : existing.name !== existing.cofeplus_display
+  if (!renamed || existing.name === label) {
+    return { cofeplus_display: label, name: label, cofeplus_display_changed_at: null }
+  }
+  return { cofeplus_display: label, cofeplus_display_changed_at: now }
+}
+
+/**
  * Upsert paid customer modifiers from CofePlus into Kafei add_ons.
  * Skips machine-required groups (temperature, cup size).
+ *
+ * With followLabels (syncing the active environment), names track the machine:
+ * an add-on still named after the previous machine label takes the new one, and
+ * an admin rename is kept but flagged for review. Other environments only
+ * refresh the machine keys, so a test sync cannot relabel live add-ons.
  */
 async function upsertAddOnsFromItems(
   adminClient: SupabaseClient,
-  items: PodItemOption[]
+  items: PodItemOption[],
+  followLabels: boolean
 ) {
   const seen = new Map<
     string,
-    { group: string; flag: string; name: string; price: number; locator?: string }
+    {
+      group: string
+      flag: string
+      price: number
+      locator?: string
+      /** label -> how many drinks use it */
+      labels: Map<string, number>
+    }
   >()
 
   for (const item of items) {
@@ -414,20 +455,24 @@ async function upsertAddOnsFromItems(
           continue
         }
         const key = `${group.group}::${option.flag}`
-        if (seen.has(key)) continue
+        const label = String(
+          option.display || `${group.display || group.group}: ${option.flag}`
+        )
+        const entry = seen.get(key)
+        if (entry) {
+          entry.labels.set(label, (entry.labels.get(label) || 0) + 1)
+          continue
+        }
         const price =
           typeof option.price === 'number'
             ? option.price
             : Number(option.price) || 0
-        const name =
-          option.display ||
-          `${group.display || group.group}: ${option.flag}`
         seen.set(key, {
           group: group.group,
           flag: option.flag,
-          name: String(name),
           price,
           locator: undefined,
+          labels: new Map([[label, 1]]),
         })
       }
     }
@@ -435,42 +480,57 @@ async function upsertAddOnsFromItems(
 
   let upserted = 0
   for (const addon of seen.values()) {
+    // Drinks can label one flag differently: the most common label wins
+    const label = [...addon.labels.entries()].sort(
+      (a, b) => b[1] - a[1] || a[0].localeCompare(b[0])
+    )[0][0]
+
     const { data: existing } = await adminClient
       .from('add_ons')
-      .select('id')
+      .select('id, name, cofeplus_display')
       .eq('cofeplus_group', addon.group)
       .eq('cofeplus_flag', addon.flag)
       .maybeSingle()
 
-    const payload = {
-      name: addon.name,
+    const now = new Date().toISOString()
+    const machineKeys = {
       description: `${addon.group} / ${addon.flag}`,
-      price: addon.price,
-      temperature: 'both' as const,
-      is_hidden: false,
       cofeplus_group: addon.group,
       cofeplus_flag: addon.flag,
       cofeplus_locator: addon.locator || null,
       source: 'cofeplus',
-      updated_at: new Date().toISOString(),
+      updated_at: now,
     }
 
     if (existing) {
-      // Keep admin display name, price, and visibility. Sync only machine keys.
+      // Keep admin price and visibility. Sync machine keys, and the name only
+      // while nobody renamed it.
+      const update: Record<string, unknown> = { ...machineKeys }
+      if (followLabels) {
+        const change = followMachineLabel(existing, label, now)
+        if (change) {
+          Object.assign(update, change)
+          if (change.cofeplus_display_changed_at) {
+            console.warn(
+              `[cofeplus-sync] ${addon.group}/${addon.flag} is now "${label}" on the machine but named "${existing.name}" in Kafei`
+            )
+          }
+        }
+      }
       const { error } = await adminClient
         .from('add_ons')
-        .update({
-          description: payload.description,
-          cofeplus_group: payload.cofeplus_group,
-          cofeplus_flag: payload.cofeplus_flag,
-          cofeplus_locator: payload.cofeplus_locator,
-          source: payload.source,
-          updated_at: payload.updated_at,
-        })
+        .update(update)
         .eq('id', existing.id)
       if (!error) upserted += 1
     } else {
-      const { error } = await adminClient.from('add_ons').insert(payload)
+      const { error } = await adminClient.from('add_ons').insert({
+        ...machineKeys,
+        name: label,
+        price: addon.price,
+        temperature: 'both' as const,
+        is_hidden: false,
+        cofeplus_display: label,
+      })
       if (!error) upserted += 1
     }
   }
@@ -565,7 +625,12 @@ export async function syncCofeplusCatalog(
       )
       productsUpserted = await upsertProductsFromItems(adminClient, allItems)
       try {
-        await upsertAddOnsFromItems(adminClient, allItems)
+        const activeEnvironment = await getActiveCofeplusEnvironment(adminClient)
+        await upsertAddOnsFromItems(
+          adminClient,
+          allItems,
+          environment === activeEnvironment
+        )
       } catch (err) {
         console.warn('[cofeplus-sync] add-on upsert failed', err)
       }

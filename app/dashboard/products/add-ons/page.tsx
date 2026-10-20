@@ -25,8 +25,9 @@ export default async function AddOnsPage() {
           <h1 className="text-3xl font-bold">Product Add-ons</h1>
           <p className="text-muted-foreground">
             Choose which machine add-ons the app shows, their display name, and
-            extra price. CofePlus sync adds new options but does not overwrite
-            your name, price, or visibility.
+            extra price. CofePlus sync adds new options and keeps names in step
+            with the machine, but never overwrites a name you changed, your
+            price, or visibility. Check name means the machine name changed.
           </p>
         </div>
         <div className="flex gap-2">
