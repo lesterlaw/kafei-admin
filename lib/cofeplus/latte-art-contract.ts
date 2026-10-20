@@ -1,5 +1,17 @@
 /** CofePlus LatteArtModifierDto. Locator is required whenever art is sent. */
 export const LATTE_ART_GROUP = 'latte-art'
+
+/**
+ * Machine groups a customer may leave empty. The machine still lists a default
+ * (syrup defaults to sirup2), so an empty choice is sent as NO_MODIFIER_FLAG and
+ * the group is left out of the dispatch instead of falling back to that default.
+ */
+export const OPTIONAL_MODIFIER_GROUPS = ['syrup'] as const
+export const NO_MODIFIER_FLAG = 'none'
+
+export function isOptionalModifierGroup(group: string | null | undefined) {
+  return (OPTIONAL_MODIFIER_GROUPS as readonly string[]).includes(group || '')
+}
 export const LATTE_ART_LOCATOR_CHOICE = 'latte-art.locator'
 export const LATTE_ART_CANVAS = 800
 export const LATTE_ART_SAFE_DIAMETER = 640

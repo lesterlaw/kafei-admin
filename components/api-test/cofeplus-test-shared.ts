@@ -2,6 +2,7 @@ import type { CofeplusEnvironment } from '@/lib/cofeplus/config'
 import {
   LATTE_ART_GROUP,
   LATTE_ART_LOCATOR_CHOICE,
+  NO_MODIFIER_FLAG,
 } from '@/lib/cofeplus/latte-art-contract'
 
 export { LATTE_ART_GROUP, LATTE_ART_LOCATOR_CHOICE }
@@ -402,6 +403,13 @@ export function selectModifiersFromGroups(
     }
 
     const preferredFlag = preferred[group.group]
+    // Customer left an optional group empty (no syrup): send nothing for it
+    if (
+      preferredFlag === NO_MODIFIER_FLAG &&
+      !group.options.some((option) => option.flag === NO_MODIFIER_FLAG)
+    ) {
+      continue
+    }
     const validOptions = group.options.filter((option) =>
       optionMatchesRequires(option, selectedByGroup)
     )
@@ -469,6 +477,10 @@ export function resolveDispatchModifiers(
     for (const [group, flag] of Object.entries(preferred)) {
       if (!flag || group === LATTE_ART_LOCATOR_CHOICE) continue
       if (group === LATTE_ART_GROUP) continue
+      if (flag === NO_MODIFIER_FLAG) {
+        byGroup.delete(group)
+        continue
+      }
       byGroup.set(group, { group, flag })
     }
     result = [...byGroup.values()]

@@ -15,6 +15,8 @@ import {
   LATTE_ART_GROUP,
   LATTE_ART_LOCATOR_CHOICE,
   HAND_LATTE_ART_ITEM_CODES,
+  NO_MODIFIER_FLAG,
+  OPTIONAL_MODIFIER_GROUPS,
   isPlainHotLatte,
   parseHandArtLocator,
 } from '@/lib/cofeplus/latte-art-contract'
@@ -599,6 +601,11 @@ async function loadOrderItemForDispatch(
         modifierPreferences[inferred.group] = inferred.flag
       }
     }
+  }
+
+  // An optional group with nothing picked means none, not the machine default
+  for (const group of OPTIONAL_MODIFIER_GROUPS) {
+    if (!modifierPreferences[group]) modifierPreferences[group] = NO_MODIFIER_FLAG
   }
 
   const latteArtFlag =

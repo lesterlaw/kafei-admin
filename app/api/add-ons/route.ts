@@ -5,6 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { getActiveCofeplusEnvironment } from '@/lib/cofeplus/settings'
 import {
   HAND_LATTE_ART_ITEM_CODES,
+  isOptionalModifierGroup,
   isPlainHotLatte,
 } from '@/lib/cofeplus/latte-art-contract'
 
@@ -137,7 +138,9 @@ export async function GET(request: NextRequest) {
         {
           ...addon,
           group_label: machineGroup.label,
-          is_default: option.isDefault,
+          // No standard option in an optional group, so the app preselects
+          // nothing and a second tap clears the choice
+          is_default: isOptionalModifierGroup(group) ? false : option.isDefault,
           hand_art_supported: handArt
             ? Boolean(handArt.get(group)?.options.has(flag))
             : true,
