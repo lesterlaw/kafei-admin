@@ -73,6 +73,10 @@ export function CreateBannerForm() {
           placeholder="https://... (optional)"
           disabled={isLoading}
         />
+        <p className="text-xs text-muted-foreground">
+          To open an app screen, use kafeiapp://plans (subscription plans), kafeiapp://rewards
+          or kafeiapp://beans. Leave empty to open drink ordering.
+        </p>
       </div>
       <div className="space-y-2">
         <Label htmlFor="sort_order">Sort Order</Label>
