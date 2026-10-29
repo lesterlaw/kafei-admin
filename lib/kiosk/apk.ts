@@ -1,4 +1,4 @@
-export const KIOSK_APK_VERSION = '1.0.18'
+export const KIOSK_APK_VERSION = '1.0.19'
 export const KIOSK_APK_FILE_NAME = 'kafei-kiosk.apk'
 export const KIOSK_APK_SIZE_LABEL = '32 MB'
 export const KIOSK_APK_PATH = `/${KIOSK_APK_FILE_NAME}`

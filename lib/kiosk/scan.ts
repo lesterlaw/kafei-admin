@@ -30,6 +30,8 @@ export interface KioskDrinkView {
   drinkImage: string | null
   /** 'hot' | 'cold' | 'both' */
   temperature: string | null
+  /** Add-on names, plus Latte art when the cup has one */
+  extras: string[]
   deliveryPort: number | null
   pickupCode: string | null
   alreadyStarted?: boolean
@@ -39,6 +41,7 @@ interface KioskDrinkInfo {
   name: string
   imageUrl: string | null
   temperature: string | null
+  extras: string[]
 }
 
 async function loadDrinkInfo(
@@ -47,7 +50,7 @@ async function loadDrinkInfo(
 ): Promise<KioskDrinkInfo> {
   const { data } = await adminClient
     .from('order_items')
-    .select('products(name, image_url, temperature)')
+    .select('addons, latte_art_flag, products(name, image_url, temperature)')
     .eq('order_id', orderId)
     .limit(1)
     .maybeSingle()
@@ -59,10 +62,36 @@ async function loadDrinkInfo(
   }
   const raw = data?.products as ProductRow | ProductRow[] | null
   const product = Array.isArray(raw) ? raw[0] : raw
+
+  const addonIds = Array.isArray(data?.addons)
+    ? (data.addons as unknown[]).filter((id): id is string => typeof id === 'string')
+    : []
+  const extras: string[] = []
+  if (addonIds.length > 0) {
+    const { data: addonRows } = await adminClient
+      .from('add_ons')
+      .select('id, name')
+      .in('id', addonIds)
+    const names = new Map(
+      ((addonRows || []) as { id: string; name: string | null }[]).map((row) => [
+        row.id,
+        row.name?.trim() || '',
+      ])
+    )
+    for (const id of addonIds) {
+      const name = names.get(id)
+      if (name) extras.push(name)
+    }
+  }
+  if (data?.latte_art_flag === 'catalog' || data?.latte_art_flag === 'upload') {
+    extras.push('Latte art')
+  }
+
   return {
     name: product?.name?.trim() || 'Drink',
     imageUrl: product?.image_url || null,
     temperature: product?.temperature || null,
+    extras,
   }
 }
 
@@ -78,6 +107,7 @@ function toDrinkView(
     drinkName: drink.name,
     drinkImage: drink.imageUrl,
     temperature: drink.temperature,
+    extras: drink.extras,
     deliveryPort:
       order.delivery_port === 1 || order.delivery_port === 2
         ? order.delivery_port
