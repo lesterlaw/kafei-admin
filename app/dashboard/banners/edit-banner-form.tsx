@@ -108,8 +108,8 @@ export function EditBannerForm({ banner }: { banner: Banner }) {
           disabled={isLoading}
         />
         <p className="text-xs text-muted-foreground">
-          To open an app screen, use kafeiapp://plans (subscription plans), kafeiapp://rewards
-          or kafeiapp://beans. Leave empty to open drink ordering.
+          To open an app screen, use kafeiapp://manage-subscription (your subscription plan),
+          kafeiapp://plans (choose a plan), kafeiapp://rewards or kafeiapp://beans. Leave empty to open drink ordering.
         </p>
       </div>
       <div className="space-y-2">

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createApiResponse, createApiError, authenticateRequest } from '@/lib/api/middleware'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { isDevOtpAllowed } from '@/lib/auth/dev-otp'
+import { isSmsOtpConfigured, sendSmsOtp } from '@/lib/auth/sms-otp'
 
 export async function POST(request: NextRequest) {
   try {
@@ -15,6 +16,18 @@ export async function POST(request: NextRequest) {
       // Allowlisted testers use the test code instead of an SMS (see lib/auth/dev-otp.ts).
       // Never reveal the code in the response.
       if (isDevOtpAllowed(phone)) {
+        return createApiResponse({
+          message: 'OTP sent to phone',
+          phone,
+        })
+      }
+
+      // SMS codes through OneWaySMS (lib/auth/sms-otp.ts)
+      if (isSmsOtpConfigured()) {
+        const result = await sendSmsOtp(phone)
+        if (!result.ok) {
+          return createApiError(result.message, result.status)
+        }
         return createApiResponse({
           message: 'OTP sent to phone',
           phone,
