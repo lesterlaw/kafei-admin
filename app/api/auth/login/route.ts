@@ -13,21 +13,21 @@ export async function POST(request: NextRequest) {
 
     // Phone OTP login (for mobile app)
     if (phone) {
-      // Allowlisted testers use the test code instead of an SMS (see lib/auth/dev-otp.ts).
-      // Never reveal the code in the response.
-      if (isDevOtpAllowed(phone)) {
+      // SMS codes through OneWaySMS (lib/auth/sms-otp.ts). Allowlisted testers get the
+      // SMS too; the test code (lib/auth/dev-otp.ts) still works for them as a fallback.
+      if (isSmsOtpConfigured()) {
+        const result = await sendSmsOtp(phone)
+        if (!result.ok && !isDevOtpAllowed(phone)) {
+          return createApiError(result.message, result.status)
+        }
         return createApiResponse({
           message: 'OTP sent to phone',
           phone,
         })
       }
 
-      // SMS codes through OneWaySMS (lib/auth/sms-otp.ts)
-      if (isSmsOtpConfigured()) {
-        const result = await sendSmsOtp(phone)
-        if (!result.ok) {
-          return createApiError(result.message, result.status)
-        }
+      // No SMS provider: allowlisted testers use the test code. Never reveal it in the response.
+      if (isDevOtpAllowed(phone)) {
         return createApiResponse({
           message: 'OTP sent to phone',
           phone,
