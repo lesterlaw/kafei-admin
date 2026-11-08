@@ -22,6 +22,7 @@ import {
   hasUsedPassDrinkToday,
   isCouponReservedOnOpenOrder,
   isStampCoupon,
+  STAFF_FREE_DRINK_ID,
 } from '@/lib/product-logic'
 import {
   drinkSupportsLatteArt,
@@ -147,7 +148,7 @@ export async function POST(request: NextRequest) {
 
     const { data: userData, error: userError } = await adminClient
       .from('users')
-      .select('id')
+      .select('id, is_staff')
       .eq('id', user.id)
       .single()
 
@@ -311,8 +312,17 @@ export async function POST(request: NextRequest) {
     let appliedAddonCouponId: string | null = null
     let dailyDrinkCouponId: string | null = null
     let stampCouponId: string | null = null
+    const isStaffOrder = coupon_id === STAFF_FREE_DRINK_ID
 
-    if (coupon_id) {
+    if (isStaffOrder) {
+      if (!userData.is_staff) {
+        return createApiError('Coupon not found', 404)
+      }
+      // Drink and add-ons are free. Label it 'staff' (the app sends 'daily_coupon'
+      // for any promo), so it never uses up a daily drink and reports can count it.
+      total = 0
+      entitlementType = 'staff'
+    } else if (coupon_id) {
       const { data: coupon } = await adminClient
         .from('coupons')
         .select('id, code, expires_at, is_redeemed, kind')
@@ -456,7 +466,13 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (addonTotal > 0 && addons && addons.length > 0 && !appliedAddonCouponId) {
+    if (
+      addonTotal > 0 &&
+      addons &&
+      addons.length > 0 &&
+      !appliedAddonCouponId &&
+      !isStaffOrder
+    ) {
       const addonCoupon = await takeUnusedAddonCoupon(adminClient, user.id)
       if (addonCoupon) {
         total = Math.max(0, Math.round((total - addonTotal) * 100) / 100)

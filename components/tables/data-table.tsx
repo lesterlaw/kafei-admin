@@ -63,6 +63,7 @@ const FILTERABLE_IDS = new Set([
   'is_hidden',
   'is_redeemed',
   'is_system',
+  'is_staff',
   'has_device_token',
   'type',
   'kind',
@@ -114,6 +115,7 @@ function booleanFilterLabel(columnId: string, value: boolean): string {
   if (columnId === 'is_active') return value ? 'Active' : 'Inactive'
   if (columnId === 'is_hidden') return value ? 'Hidden' : 'Visible'
   if (columnId === 'is_system') return value ? 'System' : 'Custom'
+  if (columnId === 'is_staff') return value ? 'Staff' : 'Customer'
   if (columnId === 'has_device_token') return value ? 'Paired' : 'No token'
   return value ? 'Yes' : 'No'
 }

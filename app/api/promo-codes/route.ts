@@ -13,6 +13,8 @@ import {
   isSecondCupEligible,
   isWelcomeDrinkAvailable,
   isStampCoupon,
+  isStaffUser,
+  STAFF_FREE_DRINK_PROMO,
 } from '@/lib/product-logic'
 
 function couponTitle(kind: string, code: string) {
@@ -37,6 +39,12 @@ export async function GET(request: NextRequest) {
 
     const supabase = createAdminClient()
     const now = Date.now()
+
+    // Staff get only the free drink. Leaving other coupons out stops the app
+    // auto-applying a daily or pass coupon, which would still charge add-ons.
+    if (await isStaffUser(supabase, user.id)) {
+      return createApiResponse([STAFF_FREE_DRINK_PROMO])
+    }
 
     const { data: allActive, error } = await supabase
       .from('promo_codes')

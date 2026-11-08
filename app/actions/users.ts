@@ -145,6 +145,24 @@ export async function updateUserStatus(id: string, isBlocked: boolean) {
   return { success: true }
 }
 
+// Staff order every drink free (lib/product-logic/staff.ts)
+export async function updateUserStaff(id: string, isStaff: boolean) {
+  await verifyAdmin()
+  const supabase = createAdminClient()
+  const { error } = await supabase
+    .from('users')
+    .update({ is_staff: isStaff })
+    .eq('id', id)
+
+  if (error) {
+    return { error: error.message }
+  }
+
+  revalidatePath('/dashboard/users')
+  revalidatePath(`/dashboard/users/${id}`)
+  return { success: true }
+}
+
 export async function deleteUser(id: string) {
   await verifyAdmin()
   const supabase = createAdminClient()

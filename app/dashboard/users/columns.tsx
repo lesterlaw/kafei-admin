@@ -151,6 +151,18 @@ export const userColumns: ColumnDef<User>[] = [
     },
   },
   {
+    id: 'is_staff',
+    header: 'Staff',
+    accessorFn: (user) => Boolean(user.is_staff),
+    cell: ({ row }) => {
+      return row.original.is_staff ? (
+        <Badge variant="secondary">Staff: free drinks</Badge>
+      ) : (
+        '—'
+      )
+    },
+  },
+  {
     accessorKey: 'created_at',
     header: 'Created At',
     cell: ({ row }) => {

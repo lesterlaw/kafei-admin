@@ -6,6 +6,7 @@ export interface User {
   created_at: string
   updated_at: string
   is_blocked: boolean
+  is_staff?: boolean
   referral_code: string
   avatar_url?: string | null
 }

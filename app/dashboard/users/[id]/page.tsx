@@ -5,6 +5,7 @@ import { formatSingaporeDateTime } from '@/lib/datetime'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { notFound } from 'next/navigation'
+import { StaffToggle } from './staff-toggle'
 
 export default async function UserDetailPage({
   params,
@@ -151,6 +152,10 @@ export default async function UserDetailPage({
               <Badge variant={user.is_blocked ? 'destructive' : 'default'}>
                 {user.is_blocked ? 'Blocked' : 'Active'}
               </Badge>
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Staff</p>
+              <StaffToggle userId={user.id} isStaff={Boolean(user.is_staff)} />
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Referral Code</p>
