@@ -7,6 +7,10 @@ export interface User {
   updated_at: string
   is_blocked: boolean
   is_staff?: boolean
+  campus?: string | null
+  user_role?: 'student' | 'staff' | 'other' | null
+  study_year?: number | null
+  marketing_opt_in?: boolean
   referral_code: string
   avatar_url?: string | null
 }

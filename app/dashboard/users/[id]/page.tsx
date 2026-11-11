@@ -158,6 +158,24 @@ export default async function UserDetailPage({
               <StaffToggle userId={user.id} isStaff={Boolean(user.is_staff)} />
             </div>
             <div>
+              <p className="text-sm text-muted-foreground">Campus</p>
+              <p className="font-medium">{user.campus || '-'}</p>
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Self-declared role</p>
+              <p className="font-medium capitalize">
+                {user.user_role
+                  ? user.user_role === 'student' && user.study_year
+                    ? `Student, year ${user.study_year}`
+                    : user.user_role
+                  : '-'}
+              </p>
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Offers and updates</p>
+              <p className="font-medium">{user.marketing_opt_in ? 'Opted in' : 'No'}</p>
+            </div>
+            <div>
               <p className="text-sm text-muted-foreground">Referral Code</p>
               <p className="font-medium">{user.referral_code}</p>
             </div>

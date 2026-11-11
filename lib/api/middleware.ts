@@ -7,6 +7,8 @@ export interface ApiResponse<T = any> {
   success: boolean
   data?: T
   error?: string
+  /** Machine-readable reason, for errors the app handles itself */
+  code?: string
   message?: string
 }
 
@@ -25,12 +27,14 @@ export const createApiResponse = <T>(
 
 export const createApiError = (
   error: string,
-  status: number = 400
+  status: number = 400,
+  code?: string
 ): NextResponse<ApiResponse> => {
   return NextResponse.json(
     {
       success: false,
       error,
+      ...(code ? { code } : {}),
     },
     { status }
   )

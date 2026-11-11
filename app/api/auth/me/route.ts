@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import { createApiResponse, createApiError, authenticateRequest } from '@/lib/api/middleware'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getStripeForMode } from '@/lib/stripe/server'
+import { hasPassword } from '@/lib/auth/password'
 import { getActiveStripeMode, isStripeModeConfigured } from '@/lib/stripe/mode'
 import {
   grantWelcomeIfNeeded,
@@ -28,7 +29,8 @@ export async function GET(request: NextRequest) {
       return createApiError(error.message, 404)
     }
 
-    return createApiResponse(data)
+    // Sign-ups and resets go on to set a password when this is false
+    return createApiResponse({ ...data, has_password: await hasPassword(adminClient, user.id) })
   } catch (error: any) {
     return createApiError(error.message || 'Internal server error', 500)
   }
@@ -42,7 +44,15 @@ export async function PUT(request: NextRequest) {
       return createApiError('Unauthorized', 401)
     }
 
-    const { full_name, email: rawEmail, referral_code_used } = await request.json()
+    const {
+      full_name,
+      email: rawEmail,
+      referral_code_used,
+      campus,
+      user_role,
+      study_year,
+      marketing_opt_in,
+    } = await request.json()
     const email = typeof rawEmail === 'string' ? rawEmail.trim().toLowerCase() : rawEmail
 
     const adminClient = createAdminClient()
@@ -63,6 +73,23 @@ export async function PUT(request: NextRequest) {
       if (emailOwner) {
         return createApiError(EMAIL_TAKEN_MESSAGE, 409)
       }
+    }
+
+    if (campus !== undefined && (typeof campus !== 'string' || !campus.trim() || campus.length > 120)) {
+      return createApiError('Please pick your campus', 400)
+    }
+    if (user_role !== undefined && !USER_ROLES.includes(user_role)) {
+      return createApiError('Please pick student, staff or other', 400)
+    }
+    if (
+      study_year !== undefined &&
+      study_year !== null &&
+      !(Number.isInteger(study_year) && study_year >= 1 && study_year <= 4)
+    ) {
+      return createApiError('Please pick your year (1 to 4)', 400)
+    }
+    if (user_role === 'student' && !study_year) {
+      return createApiError('Please pick your year of study', 400)
     }
 
     if (typeof referral_code_used === 'string' && referral_code_used.trim()) {
@@ -88,6 +115,20 @@ export async function PUT(request: NextRequest) {
 
     if (email !== undefined) {
       updateData.email = email
+    }
+
+    if (campus !== undefined) {
+      updateData.campus = campus.trim()
+    }
+
+    // The year only applies to students, so a role change clears it
+    if (user_role !== undefined) {
+      updateData.user_role = user_role
+      updateData.study_year = user_role === 'student' ? study_year : null
+    }
+
+    if (typeof marketing_opt_in === 'boolean') {
+      updateData.marketing_opt_in = marketing_opt_in
     }
 
     // Grant welcome drink + beans on first profile completion
@@ -119,6 +160,7 @@ export async function PUT(request: NextRequest) {
   }
 }
 
+const USER_ROLES = ['student', 'staff', 'other']
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const EMAIL_TAKEN_MESSAGE =
   'This email is already used by another KAFEI account. Please use a different email.'

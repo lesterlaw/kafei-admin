@@ -12,6 +12,10 @@ export function ExportUsersButton({ users }: { users: User[] }) {
       { key: 'phone', header: 'Phone' },
       { key: 'is_blocked', header: 'Status' },
       { key: 'is_staff', header: 'Staff' },
+      { key: 'campus', header: 'Campus' },
+      { key: 'user_role', header: 'Role' },
+      { key: 'study_year', header: 'Year' },
+      { key: 'marketing_opt_in', header: 'Offers opt-in' },
       { key: 'created_at', header: 'Created At' },
     ])
   }

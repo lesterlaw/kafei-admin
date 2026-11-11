@@ -7,6 +7,7 @@ import { randomUUID } from 'crypto'
 import { isDevOtpAllowed, isDevOtpCode, signDevToken } from '@/lib/auth/dev-otp'
 import { isSmsOtpConfigured, verifySmsOtp } from '@/lib/auth/sms-otp'
 import { createPhoneUserSession } from '@/lib/auth/phone-session'
+import { findUserByPhone } from '@/lib/auth/phone-user'
 
 
 export async function POST(request: NextRequest) {
@@ -286,28 +287,6 @@ function generateReferralCode(): string {
 
 function normalizePhone(phone?: string | null): string {
   return (phone ?? '').replace(/\D/g, '')
-}
-
-async function findUserByPhone(
-  adminClient: ReturnType<typeof createAdminClient>,
-  phone: string
-) {
-  const normalizedPhone = normalizePhone(phone)
-  const phoneCandidates = Array.from(
-    new Set([phone, normalizedPhone, `+${normalizedPhone}`].filter(Boolean))
-  )
-
-  const { data, error } = await adminClient
-    .from('users')
-    .select('*')
-    .in('phone', phoneCandidates)
-
-  if (error) {
-    console.error('Failed to find user by phone:', error)
-    return null
-  }
-
-  return data.find((user) => normalizePhone(user.phone) === normalizedPhone) ?? null
 }
 
 async function findAuthUser(
